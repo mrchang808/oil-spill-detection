@@ -104,6 +104,23 @@ function App() {
     }
   }, [detections, showOilSpills, showNonOilSpills]);
 
+  useEffect(() => {
+    const handleMarkerDetailsClick = (event: Event) => {
+      const customEvent = event as CustomEvent<string>;
+      const detectionId = customEvent.detail;
+      const detection = detections.find((d) => d.id === detectionId);
+      if (detection) {
+        setSelectedDetection(detection);
+      }
+    };
+
+    window.addEventListener('marker-details-click', handleMarkerDetailsClick);
+
+    return () => {
+      window.removeEventListener('marker-details-click', handleMarkerDetailsClick);
+    };
+  }, [detections]);
+
   const handleRefresh = useCallback(async () => {
     await refetch();
     await fetchStatistics(); // Also refresh statistics
@@ -118,18 +135,15 @@ function App() {
     });
   }, [detections, showOilSpills, showNonOilSpills]);
 
-  // ✅ Fetch statistics ONCE on mount - NO detections dependency!
   useEffect(() => {
     console.log('📊 Fetching statistics (once on mount)');
     fetchStatistics();
-  }, []); // ✅ Empty deps - runs ONCE
+  }, []);
 
-  // ✅ NOW CHECK LOADING - AFTER ALL HOOKS!
   if (loading && detections.length === 0) {
     return <LoadingScreen message="Loading Detections" />;
   }
 
-  // ✅ RENDER APP
   return (
     <div className="h-screen flex flex-col">
       {/* Header */}

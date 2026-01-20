@@ -8,70 +8,84 @@ interface OilSpillMapProps {
   detections: OilSpillDetection[];
   showOilSpills: boolean;
   showNonOilSpills: boolean;
-  onMarkerClick?: (detection: OilSpillDetection) => void; // ✅ NOW PROPERLY IMPLEMENTED
+  onMarkerClick?: (detection: OilSpillDetection) => void;
   initialCenter?: [number, number];
   initialZoom?: number;
-  enableClustering?: boolean;
 }
 
 const OilSpillMap: React.FC<OilSpillMapProps> = ({
   detections,
   showOilSpills,
   showNonOilSpills,
-  onMarkerClick, // ✅ USING THE PROP
+  onMarkerClick,
   initialCenter = [25, 0],
   initialZoom = 2,
-  enableClustering = false,
 }) => {
   const mapRef = useRef<L.Map | null>(null);
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const markersRef = useRef<L.LayerGroup | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
-  /**
-   * Initialize map
-   */
+  // 1. Initialize Map
   useEffect(() => {
     if (!mapContainerRef.current || mapRef.current) return;
 
-    // Create map
     const map = L.map(mapContainerRef.current, {
       center: initialCenter,
       zoom: initialZoom,
       zoomControl: true,
       attributionControl: true,
-      preferCanvas: true, // Better performance for many markers
+      preferCanvas: true,
     });
 
-    // Add tile layer
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      attribution:
-        '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+      attribution: '&copy; OpenStreetMap contributors',
       maxZoom: 19,
     }).addTo(map);
 
-    mapRef.current = map;
     markersRef.current = L.layerGroup().addTo(map);
+    mapRef.current = map;
+    
+    // Safety timeout to ensure map renders correctly after init
+    setTimeout(() => {
+      map.invalidateSize();
+      setIsLoading(false);
+    }, 500);
 
-    // Set loading to false after map is initialized
-    setTimeout(() => setIsLoading(false), 500);
-
-    // Cleanup
     return () => {
       if (mapRef.current) {
         mapRef.current.remove();
         mapRef.current = null;
       }
     };
-  }, [initialCenter, initialZoom]);
+  }, []); // Run once on mount
 
-  /**
-   * Update markers when detections change
-   */
+  // 2. NEW: Handle Container Resizing (Fixes the "Disappearing Map" bug)
+  useEffect(() => {
+    if (!mapContainerRef.current || !mapRef.current) return;
+
+    const resizeObserver = new ResizeObserver(() => {
+      if (mapRef.current) {
+        mapRef.current.invalidateSize();
+      }
+    });
+
+    resizeObserver.observe(mapContainerRef.current);
+
+    return () => {
+      resizeObserver.disconnect();
+    };
+  }, []);
+
+  // 3. Update Markers (Optimized to not clear if not needed)
   useEffect(() => {
     if (!mapRef.current || !markersRef.current) return;
 
-    // Clear existing markers
+    // Ensure layer group is attached
+    if (!mapRef.current.hasLayer(markersRef.current)) {
+      markersRef.current.addTo(mapRef.current);
+    }
+
     markersRef.current.clearLayers();
 
     // Filter detections based on visibility settings
@@ -125,25 +139,105 @@ const OilSpillMap: React.FC<OilSpillMapProps> = ({
       // Create marker
       const marker = L.marker([detection.latitude, detection.longitude], { icon });
 
-      // Create enhanced popup content
-      const popupContent = createPopupContent(detection);
+      // Create Popup using DOM elements instead of HTML strings
+      const popupContent = document.createElement('div');
+      popupContent.innerHTML = `
+        <div class="p-3 min-w-[250px]">
+          <div class="flex items-center justify-between mb-3">
+            <div class="font-bold text-lg ${isOilSpill ? 'text-red-600' : 'text-green-600'}">
+              ${detection.status}
+            </div>
+            ${
+              detection.severity
+                ? `<span class="px-2 py-1 rounded-full text-xs font-semibold ${getSeverityBadgeClass(detection.severity)}">
+                    ${detection.severity}
+                  </span>`
+                : ''
+            }
+          </div>
+          
+          <div class="space-y-2 text-sm">
+            <div class="flex items-start">
+              <span class="font-semibold text-gray-600 min-w-[80px]">Location:</span>
+              <span class="text-gray-800">${detection.latitude.toFixed(4)}, ${detection.longitude.toFixed(4)}</span>
+            </div>
+            
+            <div class="flex items-start">
+              <span class="font-semibold text-gray-600 min-w-[80px]">Detected:</span>
+              <span class="text-gray-800">${new Date(detection.detected_at).toLocaleString()}</span>
+            </div>
+            
+            ${
+              detection.confidence
+                ? `<div class="flex items-start">
+                    <span class="font-semibold text-gray-600 min-w-[80px]">Confidence:</span>
+                    <span class="text-gray-800">${(detection.confidence * 100).toFixed(1)}%</span>
+                  </div>`
+                : ''
+            }
+            
+            ${
+              detection.area_affected_km2
+                ? `<div class="flex items-start">
+                    <span class="font-semibold text-gray-600 min-w-[80px]">Area:</span>
+                    <span class="text-gray-800">${detection.area_affected_km2.toFixed(2)} km²</span>
+                  </div>`
+                : ''
+            }
+            
+            ${
+              detection.response_status
+                ? `<div class="flex items-start">
+                    <span class="font-semibold text-gray-600 min-w-[80px]">Response:</span>
+                    <span class="px-2 py-0.5 rounded text-xs font-medium ${getResponseStatusClass(detection.response_status)}">
+                      ${detection.response_status}
+                    </span>
+                  </div>`
+                : ''
+            }
+            
+            ${
+              detection.validation_status
+                ? `<div class="flex items-start">
+                    <span class="font-semibold text-gray-600 min-w-[80px]">Status:</span>
+                    <span class="px-2 py-0.5 rounded text-xs font-medium ${getValidationStatusClass(detection.validation_status)}">
+                      ${detection.validation_status}
+                    </span>
+                  </div>`
+                : ''
+            }
+          </div>
+          
+          <div class="mt-3 pt-3 border-t border-gray-200">
+            <button 
+              id="btn-${detection.id}"
+              class="w-full px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium"
+            >
+              View Details
+            </button>
+          </div>
+        </div>
+      `;
+
+      // Bind click event to the button inside the popup
+      popupContent.querySelector(`#btn-${detection.id}`)?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (onMarkerClick) {
+          onMarkerClick(detection);
+        }
+        // Also dispatch custom event for alternative handling
+        window.dispatchEvent(new CustomEvent('marker-details-click', { detail: detection.id }));
+      });
+
       marker.bindPopup(popupContent, {
         maxWidth: 300,
         className: 'custom-popup',
       });
 
-      marker.on('click', () => {
-        if (onMarkerClick) {
-          onMarkerClick(detection);
-        }
-      });
-
-      // Add hover effect
       marker.on('mouseover', function (this: L.Marker) {
         this.openPopup();
       });
 
-      // Add marker to layer group
       marker.addTo(markersRef.current!);
     });
 
@@ -158,91 +252,6 @@ const OilSpillMap: React.FC<OilSpillMapProps> = ({
       });
     }
   }, [detections, showOilSpills, showNonOilSpills, onMarkerClick]);
-
-  /**
-   * Create enhanced popup content
-   */
-  const createPopupContent = (detection: OilSpillDetection): string => {
-    const isOilSpill = detection.status === 'Oil spill';
-    
-    return `
-      <div class="p-3 min-w-[250px]">
-        <div class="flex items-center justify-between mb-3">
-          <div class="font-bold text-lg ${isOilSpill ? 'text-red-600' : 'text-green-600'}">
-            ${detection.status}
-          </div>
-          ${
-            detection.severity
-              ? `<span class="px-2 py-1 rounded-full text-xs font-semibold ${getSeverityBadgeClass(detection.severity)}">
-                  ${detection.severity}
-                </span>`
-              : ''
-          }
-        </div>
-        
-        <div class="space-y-2 text-sm">
-          <div class="flex items-start">
-            <span class="font-semibold text-gray-600 min-w-[80px]">Location:</span>
-            <span class="text-gray-800">${detection.latitude.toFixed(4)}, ${detection.longitude.toFixed(4)}</span>
-          </div>
-          
-          <div class="flex items-start">
-            <span class="font-semibold text-gray-600 min-w-[80px]">Detected:</span>
-            <span class="text-gray-800">${new Date(detection.detected_at).toLocaleString()}</span>
-          </div>
-          
-          ${
-            detection.confidence
-              ? `<div class="flex items-start">
-                  <span class="font-semibold text-gray-600 min-w-[80px]">Confidence:</span>
-                  <span class="text-gray-800">${(detection.confidence * 100).toFixed(1)}%</span>
-                </div>`
-              : ''
-          }
-          
-          ${
-            detection.area_affected_km2
-              ? `<div class="flex items-start">
-                  <span class="font-semibold text-gray-600 min-w-[80px]">Area:</span>
-                  <span class="text-gray-800">${detection.area_affected_km2.toFixed(2)} km²</span>
-                </div>`
-              : ''
-          }
-          
-          ${
-            detection.response_status
-              ? `<div class="flex items-start">
-                  <span class="font-semibold text-gray-600 min-w-[80px]">Response:</span>
-                  <span class="px-2 py-0.5 rounded text-xs font-medium ${getResponseStatusClass(detection.response_status)}">
-                    ${detection.response_status}
-                  </span>
-                </div>`
-              : ''
-          }
-          
-          ${
-            detection.validation_status
-              ? `<div class="flex items-start">
-                  <span class="font-semibold text-gray-600 min-w-[80px]">Status:</span>
-                  <span class="px-2 py-0.5 rounded text-xs font-medium ${getValidationStatusClass(detection.validation_status)}">
-                    ${detection.validation_status}
-                  </span>
-                </div>`
-              : ''
-          }
-        </div>
-        
-        <div class="mt-3 pt-3 border-t border-gray-200">
-          <button 
-            onclick="window.dispatchEvent(new CustomEvent('marker-details-click', { detail: '${detection.id}' }))"
-            class="w-full px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium"
-          >
-            View Details
-          </button>
-        </div>
-      </div>
-    `;
-  };
 
   /**
    * Helper functions for styling

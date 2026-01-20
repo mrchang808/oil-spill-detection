@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { X, ExternalLink, Satellite, Wind, Waves, AlertCircle, Calendar, MapPin, Tag, FileText, Image } from 'lucide-react';
 import { OilSpillDetection, CopernicusProduct } from '../../types/oilSpill';
 import { findSatelliteImagery } from '../../services/copernicus/copernicusAPI';
+import { SecureImage } from '../common/SecureImage';
 
 interface DetectionDetailsModalProps {
   detection: OilSpillDetection | null;
@@ -355,14 +356,10 @@ const DetectionDetailsModal: React.FC<DetectionDetailsModalProps> = ({ detection
                           <div key={product.id} className="border border-gray-200 rounded-lg p-4">
                             <div className="aspect-video bg-gray-100 rounded mb-3 flex items-center justify-center">
                               {product.preview_url ? (
-                                <img
-                                  src={product.preview_url}
-                                  alt={product.title}
-                                  className="w-full h-full object-cover rounded"
-                                  onError={(e) => {
-                                    e.currentTarget.src = '';
-                                    e.currentTarget.style.display = 'none';
-                                  }}
+                                <SecureImage 
+                                  src={product.preview_url!} 
+                                  alt={product.title} 
+                                  className="w-full h-full object-cover rounded" 
                                 />
                               ) : (
                                 <Image className="w-12 h-12 text-gray-400" />
@@ -416,14 +413,10 @@ const DetectionDetailsModal: React.FC<DetectionDetailsModalProps> = ({ detection
                           <div key={product.id} className="border border-gray-200 rounded-lg p-4">
                             <div className="aspect-video bg-gray-100 rounded mb-3 flex items-center justify-center">
                               {product.preview_url ? (
-                                <img
-                                  src={product.preview_url}
-                                  alt={product.title}
-                                  className="w-full h-full object-cover rounded"
-                                  onError={(e) => {
-                                    e.currentTarget.src = '';
-                                    e.currentTarget.style.display = 'none';
-                                  }}
+                                <SecureImage 
+                                  src={product.preview_url!} 
+                                  alt={product.title} 
+                                  className="w-full h-full object-cover rounded" 
                                 />
                               ) : (
                                 <Image className="w-12 h-12 text-gray-400" />

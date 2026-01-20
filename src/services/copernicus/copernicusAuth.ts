@@ -153,3 +153,7 @@ export async function authenticatedFetch(
 
   return response;
 }
+
+export const getCopernicusToken = async (): Promise<string> => {
+  return await CopernicusAuth.getAccessToken();
+};
