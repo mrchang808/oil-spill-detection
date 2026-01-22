@@ -25,3 +25,5 @@ dist/
 .env
 .env.local
 .DS_Store
+
+src/scripts/
