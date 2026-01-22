@@ -24,15 +24,14 @@ export const SecureImage = ({ src, alt, className }: SecureImageProps) => {
         setLoading(true);
         setError(false);
 
-        // 1. Get a fresh token directly
         const token = await getCopernicusToken();
         
-        // 2. Fetch the image as a BLOB with the Auth header
-        const response = await fetch(src, {
-          headers: {
-            'Authorization': `Bearer ${token}`
-          }
-        });
+        // Append token to URL so it survives the 302 Redirect
+        // Browsers strip the Authorization header on cross-origin redirects
+        const separator = src.includes('?') ? '&' : '?';
+        const urlWithToken = `${src}${separator}access_token=${token}`;
+
+        const response = await fetch(urlWithToken);
 
         if (!response.ok) {
           throw new Error(`Failed to load: ${response.statusText}`);

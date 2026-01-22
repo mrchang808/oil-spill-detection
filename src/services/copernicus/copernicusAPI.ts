@@ -8,7 +8,10 @@
 import { CopernicusProduct } from '../../types/oilSpill';
 import { authenticatedFetch } from './copernicusAuth';
 
-const COPERNICUS_BASE_URL = 'https://catalogue.dataspace.copernicus.eu/odata/v1';
+// Use local proxy in DEV mode to avoid CORS errors
+const COPERNICUS_BASE_URL = import.meta.env.DEV 
+  ? '/odata/v1' 
+  : 'https://catalogue.dataspace.copernicus.eu/odata/v1';
 const COPERNICUS_STAC_URL = 'https://catalogue.dataspace.copernicus.eu/stac';
 
 interface CopernicusSearchParams {

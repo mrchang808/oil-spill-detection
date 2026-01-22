@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { X, ExternalLink, Satellite, Wind, Waves, AlertCircle, Calendar, MapPin, Tag, FileText, Image } from 'lucide-react';
 import { OilSpillDetection, CopernicusProduct } from '../../types/oilSpill';
 import { findSatelliteImagery } from '../../services/copernicus/copernicusAPI';
+import { getCopernicusToken } from '../../services/copernicus/copernicusAuth';
 import { SecureImage } from '../common/SecureImage';
 
 interface DetectionDetailsModalProps {
@@ -23,6 +24,35 @@ const DetectionDetailsModal: React.FC<DetectionDetailsModalProps> = ({ detection
       loadSatelliteImagery();
     }
   }, [detection]);
+
+  const handleSecurePreview = async (url: string, title: string) => {
+    try {
+      const token = await getCopernicusToken(); // Ensure you have this imported
+      
+      // Use query param for token instead of header
+      const separator = url.includes('?') ? '&' : '?';
+      const urlWithToken = `${url}${separator}access_token=${token}`;
+      
+      const response = await fetch(urlWithToken);
+      
+      if (!response.ok) throw new Error('Failed to load');
+      
+      const blob = await response.blob();
+      const objectUrl = URL.createObjectURL(blob);
+      
+      const newWindow = window.open();
+      if (newWindow) {
+        newWindow.document.write(
+          `<html><head><title>${title}</title></head>` +
+          `<body style="margin:0;display:flex;justify-content:center;background:#111;">` +
+          `<img src="${objectUrl}" style="max-width:100%;height:auto;"/></body></html>`
+        );
+      }
+    } catch (e) {
+      console.error("Preview failed", e);
+      alert("Could not load secure preview. The satellite data might be archived or offline.");
+    }
+  };
 
   const loadSatelliteImagery = async () => {
     if (!detection) return;
@@ -372,14 +402,12 @@ const DetectionDetailsModal: React.FC<DetectionDetailsModalProps> = ({ detection
                               </p>
                               <div className="flex gap-2">
                                 {product.preview_url && (
-                                  <a
-                                    href={product.preview_url}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
+                                  <button
+                                    onClick={() => product.preview_url && handleSecurePreview(product.preview_url, product.title)}
                                     className="text-blue-600 hover:text-blue-700 flex items-center gap-1"
                                   >
                                     Preview <ExternalLink className="w-3 h-3" />
-                                  </a>
+                                  </button>
                                 )}
                                 <button
                                   onClick={() => setEditedData({
@@ -434,14 +462,12 @@ const DetectionDetailsModal: React.FC<DetectionDetailsModalProps> = ({ detection
                               )}
                               <div className="flex gap-2">
                                 {product.preview_url && (
-                                  <a
-                                    href={product.preview_url}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
+                                  <button
+                                    onClick={() => product.preview_url && handleSecurePreview(product.preview_url, product.title)}
                                     className="text-blue-600 hover:text-blue-700 flex items-center gap-1"
                                   >
                                     Preview <ExternalLink className="w-3 h-3" />
-                                  </a>
+                                  </button>
                                 )}
                                 <button
                                   onClick={() => setEditedData({

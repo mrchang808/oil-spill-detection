@@ -12,4 +12,14 @@ export default defineConfig({
   optimizeDeps: {
     exclude: ['lucide-react'],
   },
+  server: {
+    proxy: {
+      // Proxy /odata requests to Copernicus to bypass CORS/Redirect issues
+      '/odata': {
+        target: 'https://catalogue.dataspace.copernicus.eu',
+        changeOrigin: true,
+        secure: false,
+      },
+    },
+  },
 });

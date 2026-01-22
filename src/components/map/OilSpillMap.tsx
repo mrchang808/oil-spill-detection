@@ -3,6 +3,7 @@ import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { OilSpillDetection } from '../../types/oilSpill';
 import { MapLoadingOverlay } from '../layout/LoadingScreen';
+import { getOSILayerUrl } from '../../services/copernicus/layers';
 
 interface OilSpillMapProps {
   detections: OilSpillDetection[];
@@ -24,7 +25,9 @@ const OilSpillMap: React.FC<OilSpillMapProps> = ({
   const mapRef = useRef<L.Map | null>(null);
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const markersRef = useRef<L.LayerGroup | null>(null);
+  const osiLayerRef = useRef<L.TileLayer | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [layerMode, setLayerMode] = useState<'natural' | 'osi'>('natural');
 
   // 1. Initialize Map
   useEffect(() => {
@@ -76,6 +79,33 @@ const OilSpillMap: React.FC<OilSpillMapProps> = ({
       resizeObserver.disconnect();
     };
   }, []);
+
+  // 2.5 NEW: Handle Layer Mode Changes (Oil Analysis vs Natural Color)
+  useEffect(() => {
+    if (!mapRef.current) return;
+
+    if (layerMode === 'osi') {
+      // Add OSI layer overlay
+      if (!osiLayerRef.current) {
+        const osiLayer = L.tileLayer(
+          getOSILayerUrl('sentinel-2'),
+          {
+            opacity: 0.7,
+            attribution: '© Copernicus Data Space Ecosystem',
+            zIndex: 400,
+          }
+        );
+        osiLayer.addTo(mapRef.current);
+        osiLayerRef.current = osiLayer;
+      }
+    } else {
+      // Remove OSI layer overlay
+      if (osiLayerRef.current && mapRef.current.hasLayer(osiLayerRef.current)) {
+        mapRef.current.removeLayer(osiLayerRef.current);
+        osiLayerRef.current = null;
+      }
+    }
+  }, [layerMode]);
 
   // 3. Update Markers (Optimized to not clear if not needed)
   useEffect(() => {
@@ -305,6 +335,19 @@ const OilSpillMap: React.FC<OilSpillMapProps> = ({
     <div className="relative w-full h-full">
       <div ref={mapContainerRef} className="w-full h-full" />
       {isLoading && <MapLoadingOverlay />}
+      
+      {/* Layer Mode Control */}
+      <div className="absolute top-4 left-14 z-[1000] bg-white rounded-lg shadow-lg p-3">
+        <label className="block text-xs font-semibold text-gray-700 mb-2">Visualization Mode</label>
+        <select
+          value={layerMode}
+          onChange={(e) => setLayerMode(e.target.value as 'natural' | 'osi')}
+          className="w-full px-2 py-1 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:outline-none"
+        >
+          <option value="natural">Natural Color</option>
+          <option value="osi">Oil Spill Index</option>
+        </select>
+      </div>
       
       {/* Custom CSS for popup styling */}
       <style>{`
