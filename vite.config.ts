@@ -27,6 +27,12 @@ export default defineConfig({
         secure: false,
         rewrite: (path) => path.replace(/^\/process-api/, ''),
       },
+      '/wms': {
+        target: 'https://sh.dataspace.copernicus.eu',
+        changeOrigin: true,
+        secure: false,
+        rewrite: (path) => path.replace(/^\/wms/, '/ogc/wms'),
+      },
     },
   },
 });

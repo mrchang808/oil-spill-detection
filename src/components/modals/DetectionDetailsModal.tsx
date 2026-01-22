@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { X, ExternalLink, Satellite, Wind, Waves, AlertCircle, Calendar, MapPin, Tag, FileText, Image } from 'lucide-react';
+import { X, ExternalLink, Satellite, Wind, Waves, AlertCircle, Calendar, MapPin, Tag, FileText, Image as ImageIcon } from 'lucide-react';
 import { OilSpillDetection, CopernicusProduct } from '../../types/oilSpill';
 import { findSatelliteImagery } from '../../services/copernicus/copernicusAPI';
 import { getCopernicusToken } from '../../services/copernicus/copernicusAuth';
@@ -17,6 +17,8 @@ const DetectionDetailsModal: React.FC<DetectionDetailsModalProps> = ({ detection
   const [satelliteImages, setSatelliteImages] = useState<{sar: CopernicusProduct[], optical: CopernicusProduct[]}>({ sar: [], optical: [] });
   const [loadingImages, setLoadingImages] = useState(false);
   const [activeTab, setActiveTab] = useState<'overview' | 'satellite' | 'news'>('overview');
+  const [previewImage, setPreviewImage] = useState<{url: string, title: string} | null>(null);
+  const [loadingPreview, setLoadingPreview] = useState(false);
 
   useEffect(() => {
     if (detection) {
@@ -26,45 +28,80 @@ const DetectionDetailsModal: React.FC<DetectionDetailsModalProps> = ({ detection
   }, [detection]);
 
   const handleSecurePreview = async (url: string, title: string) => {
-    // If it's a PROCESS tag, we can't easily open it in a new tab without fetching it first
-    // For simplicity, we'll alert the user or implement a lightweight modal later.
-    // For now, let's just log it or show a toast.
-    if (url.startsWith('PROCESS:')) {
-      alert("Please view the image in the thumbnail grid below. Full-screen preview for Process API is coming soon.");
-      return;
-    }
-
+    setLoadingPreview(true);
     try {
       const token = await getCopernicusToken();
-      
-      // 1. FORCE PROXY logic
-      let fetchUrl = url;
-      if (import.meta.env.DEV && url.includes('catalogue.dataspace.copernicus.eu')) {
-        fetchUrl = url.replace('https://catalogue.dataspace.copernicus.eu', '');
+      let objectUrl: string | null = null;
+
+      // CASE A: Process API (Real Satellite Data)
+      if (url.startsWith('PROCESS|')) {
+        const parts = url.split('|');
+        const [_, platform, id, bboxStr, dateStr] = parts;
+        const bbox = bboxStr.split(',').map(Number);
+        
+        // Time window for High Res
+        const date = new Date(dateStr);
+        const start = new Date(date.getTime() - 120000).toISOString(); // +/- 2 mins
+        const end = new Date(date.getTime() + 120000).toISOString();
+
+        // Evalscripts (Same as SecureImage but maybe tuned for bigger screens)
+        const evalscriptSAR = `
+          //VERSION=3
+          function setup() { return { input: ["VV"], output: { bands: 3 } }; }
+          function evaluatePixel(sample) { var val = 2.5 * sample.VV; return [val, val, val]; }
+        `;
+        const evalscriptOptical = `
+          //VERSION=3
+          function setup() { return { input: ["B04", "B03", "B02"], output: { bands: 3 } }; }
+          function evaluatePixel(sample) { return [2.5 * sample.B04, 2.5 * sample.B03, 2.5 * sample.B02]; }
+        `;
+
+        const body = {
+          input: {
+            bounds: { bbox: bbox, properties: { crs: "http://www.opengis.net/def/crs/EPSG/0/4326" } },
+            data: [{
+              type: platform === 'SENTINEL-1' ? 'sentinel-1-grd' : 'sentinel-2-l2a',
+              dataFilter: { timeRange: { from: start, to: end }, mosaickingOrder: "leastRecent" }
+            }]
+          },
+          output: {
+            width: 1024, // HIGHER RES for Preview
+            height: 768,
+            responses: [{ identifier: "default", format: { type: "image/jpeg" } }]
+          },
+          evalscript: platform === 'SENTINEL-1' ? evalscriptSAR : evalscriptOptical
+        };
+
+        const response = await fetch('/process-api', {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify(body)
+        });
+
+        if (!response.ok) throw new Error('Process API Failed');
+        const blob = await response.blob();
+        objectUrl = URL.createObjectURL(blob);
+      } 
+      // CASE B: Standard URL
+      else {
+        let fetchUrl = url;
+        if (import.meta.env.DEV && url.includes('catalogue.dataspace.copernicus.eu')) {
+          fetchUrl = url.replace('https://catalogue.dataspace.copernicus.eu', '');
+        }
+        const separator = fetchUrl.includes('?') ? '&' : '?';
+        const response = await fetch(`${fetchUrl}${separator}access_token=${token}`);
+        if (!response.ok) throw new Error('Failed to load');
+        const blob = await response.blob();
+        objectUrl = URL.createObjectURL(blob);
       }
 
-      // 2. FORCE TOKEN IN URL logic
-      const separator = fetchUrl.includes('?') ? '&' : '?';
-      const urlWithToken = `${fetchUrl}${separator}access_token=${token}`;
-      
-      const response = await fetch(urlWithToken);
-      
-      if (!response.ok) throw new Error('Failed to load');
-      
-      const blob = await response.blob();
-      const objectUrl = URL.createObjectURL(blob);
-      
-      const newWindow = window.open();
-      if (newWindow) {
-        newWindow.document.write(
-          `<html><head><title>${title}</title></head>` +
-          `<body style="margin:0;display:flex;justify-content:center;background:#111;">` +
-          `<img src="${objectUrl}" style="max-width:100%;height:auto;"/></body></html>`
-        );
-      }
+      if (objectUrl) setPreviewImage({ url: objectUrl, title });
+
     } catch (e) {
       console.error("Preview failed", e);
-      alert("Could not load secure preview. The satellite data might be archived or offline.");
+      alert("Could not generate high-res preview. The data might be offline.");
+    } finally {
+      setLoadingPreview(false);
     }
   };
   
@@ -382,124 +419,53 @@ const DetectionDetailsModal: React.FC<DetectionDetailsModalProps> = ({ detection
           {activeTab === 'satellite' && (
             <div className="space-y-6">
               {loadingImages ? (
-                <div className="text-center py-8">
-                  <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
-                  <p className="mt-2 text-gray-600">Loading satellite imagery...</p>
-                </div>
+                <div className="text-center py-8"><div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div></div>
               ) : (
                 <>
                   {/* SAR Images */}
                   <div>
-                    <h3 className="font-semibold text-gray-700 mb-4 flex items-center gap-2">
-                      <Satellite className="w-4 h-4" />
-                      Sentinel-1 SAR Images
-                    </h3>
+                    <h3 className="font-semibold text-gray-700 mb-4 flex items-center gap-2"><Satellite className="w-4 h-4" /> Sentinel-1 SAR</h3>
                     {satelliteImages.sar.length > 0 ? (
                       <div className="grid grid-cols-2 gap-4">
                         {satelliteImages.sar.map((product) => (
                           <div key={product.id} className="border border-gray-200 rounded-lg p-4">
-                            <div className="aspect-video bg-gray-100 rounded mb-3 flex items-center justify-center">
-                              {product.preview_url ? (
-                                <SecureImage 
-                                  src={product.preview_url!} 
-                                  alt={product.title} 
-                                  className="w-full h-full object-cover rounded" 
-                                />
-                              ) : (
-                                <Image className="w-12 h-12 text-gray-400" />
-                              )}
+                            <div className="aspect-video bg-gray-100 rounded mb-3 overflow-hidden">
+                              <SecureImage src={product.preview_url!} alt={product.title} className="w-full h-full object-cover" />
                             </div>
-                            <div className="space-y-1 text-sm">
-                              <p className="font-medium truncate">{product.title}</p>
-                              <p className="text-gray-600">
-                                {new Date(product.acquisition_date).toLocaleDateString()}
-                              </p>
-                              <div className="flex gap-2">
-                                {product.preview_url && (
-                                  <button
-                                    onClick={() => product.preview_url && handleSecurePreview(product.preview_url, product.title)}
-                                    className="text-blue-600 hover:text-blue-700 flex items-center gap-1"
-                                  >
-                                    Preview <ExternalLink className="w-3 h-3" />
-                                  </button>
-                                )}
-                                <button
-                                  onClick={() => setEditedData({
-                                    ...editedData,
-                                    sar_image_url: product.preview_url,
-                                    copernicus_product_id: product.id
-                                  })}
-                                  className="text-green-600 hover:text-green-700"
-                                >
-                                  Use This
-                                </button>
-                              </div>
-                            </div>
+                            <button
+                              onClick={() => product.preview_url && handleSecurePreview(product.preview_url, product.title)}
+                              disabled={loadingPreview}
+                              className="w-full py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:bg-gray-400 flex items-center justify-center gap-2"
+                            >
+                              {loadingPreview ? 'Loading...' : <>Preview Full Size <ExternalLink className="w-4 h-4" /></>}
+                            </button>
                           </div>
                         ))}
                       </div>
-                    ) : (
-                      <p className="text-gray-500 text-sm">No SAR images found for this location and time period.</p>
-                    )}
+                    ) : <p className="text-gray-500">No SAR images found.</p>}
                   </div>
 
                   {/* Optical Images */}
                   <div>
-                    <h3 className="font-semibold text-gray-700 mb-4 flex items-center gap-2">
-                      <Image className="w-4 h-4" />
-                      Sentinel-2 Optical Images
-                    </h3>
+                    <h3 className="font-semibold text-gray-700 mb-4 flex items-center gap-2"><ImageIcon className="w-4 h-4" /> Sentinel-2 Optical</h3>
                     {satelliteImages.optical.length > 0 ? (
                       <div className="grid grid-cols-2 gap-4">
                         {satelliteImages.optical.map((product) => (
                           <div key={product.id} className="border border-gray-200 rounded-lg p-4">
-                            <div className="aspect-video bg-gray-100 rounded mb-3 flex items-center justify-center">
-                              {product.preview_url ? (
-                                <SecureImage 
-                                  src={product.preview_url!} 
-                                  alt={product.title} 
-                                  className="w-full h-full object-cover rounded" 
-                                />
-                              ) : (
-                                <Image className="w-12 h-12 text-gray-400" />
-                              )}
+                            <div className="aspect-video bg-gray-100 rounded mb-3 overflow-hidden">
+                              <SecureImage src={product.preview_url!} alt={product.title} className="w-full h-full object-cover" />
                             </div>
-                            <div className="space-y-1 text-sm">
-                              <p className="font-medium truncate">{product.title}</p>
-                              <p className="text-gray-600">
-                                {new Date(product.acquisition_date).toLocaleDateString()}
-                              </p>
-                              {product.cloud_coverage !== undefined && (
-                                <p className="text-gray-600">
-                                  Cloud: {product.cloud_coverage.toFixed(1)}%
-                                </p>
-                              )}
-                              <div className="flex gap-2">
-                                {product.preview_url && (
-                                  <button
-                                    onClick={() => product.preview_url && handleSecurePreview(product.preview_url, product.title)}
-                                    className="text-blue-600 hover:text-blue-700 flex items-center gap-1"
-                                  >
-                                    Preview <ExternalLink className="w-3 h-3" />
-                                  </button>
-                                )}
-                                <button
-                                  onClick={() => setEditedData({
-                                    ...editedData,
-                                    optical_image_url: product.preview_url
-                                  })}
-                                  className="text-green-600 hover:text-green-700"
-                                >
-                                  Use This
-                                </button>
-                              </div>
-                            </div>
+                            <button
+                               onClick={() => product.preview_url && handleSecurePreview(product.preview_url, product.title)}
+                               disabled={loadingPreview}
+                               className="w-full py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:bg-gray-400 flex items-center justify-center gap-2"
+                            >
+                              {loadingPreview ? 'Loading...' : <>Preview Full Size <ExternalLink className="w-4 h-4" /></>}
+                            </button>
                           </div>
                         ))}
                       </div>
-                    ) : (
-                      <p className="text-gray-500 text-sm">No optical images found for this location and time period.</p>
-                    )}
+                    ) : <p className="text-gray-500">No optical images found (Likely cloud cover or no pass).</p>}
                   </div>
                 </>
               )}
@@ -582,6 +548,28 @@ const DetectionDetailsModal: React.FC<DetectionDetailsModalProps> = ({ detection
           </div>
         </div>
       </div>
+
+      {/* LIGHTBOX OVERLAY */}
+      {previewImage && (
+        <div className="fixed inset-0 z-[3000] bg-black/95 flex flex-col items-center justify-center p-4">
+          <div className="w-full max-w-7xl flex justify-between items-center text-white mb-4 px-4">
+            <h3 className="text-lg font-medium truncate flex-1">{previewImage.title}</h3>
+            <button 
+              onClick={() => setPreviewImage(null)}
+              className="p-2 bg-white/10 hover:bg-white/20 rounded-full transition-colors ml-4"
+            >
+              <X className="w-8 h-8" />
+            </button>
+          </div>
+          <div className="relative w-full h-full flex items-center justify-center overflow-hidden">
+             <img 
+               src={previewImage.url} 
+               alt="Full Preview" 
+               className="max-w-full max-h-[85vh] object-contain rounded shadow-2xl border border-gray-800"
+             />
+          </div>
+        </div>
+      )}
     </div>
   );
 };

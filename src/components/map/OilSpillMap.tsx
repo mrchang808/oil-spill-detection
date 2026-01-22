@@ -80,31 +80,40 @@ const OilSpillMap: React.FC<OilSpillMapProps> = ({
     };
   }, []);
 
-  // 2.5 NEW: Handle Layer Mode Changes (Oil Analysis vs Natural Color)
+  // 2.5 Handle Layer Mode (Async Token Fetching)
   useEffect(() => {
     if (!mapRef.current) return;
 
-    if (layerMode === 'osi') {
-      // Add OSI layer overlay
-      if (!osiLayerRef.current) {
-        const osiLayer = L.tileLayer(
-          getOSILayerUrl('sentinel-2'),
-          {
-            opacity: 0.7,
-            attribution: '© Copernicus Data Space Ecosystem',
-            zIndex: 400,
+    const updateLayer = async () => {
+      if (layerMode === 'osi') {
+        // Fetch URL (which now gets a fresh token)
+        try {
+          const url = await getOSILayerUrl('29f8cc0a-0402-4545-978d-6979603d204d'); // Use a public Sentinel Hub ID or the generic one
+          // Note: For CDSE WMS, you often use a specific configuration ID. 
+          // If you don't have one, we can try the generic OGC endpoint pattern.
+          // Let's rely on the layers.ts logic we just wrote.
+          
+          if (!osiLayerRef.current) {
+            const osiLayer = L.tileLayer(url, {
+              opacity: 0.7,
+              attribution: '© Copernicus Data Space Ecosystem',
+              zIndex: 400,
+            });
+            osiLayer.addTo(mapRef.current!);
+            osiLayerRef.current = osiLayer;
           }
-        );
-        osiLayer.addTo(mapRef.current);
-        osiLayerRef.current = osiLayer;
+        } catch (e) {
+          console.error("Failed to load OSI Layer", e);
+        }
+      } else {
+        if (osiLayerRef.current && mapRef.current.hasLayer(osiLayerRef.current)) {
+          mapRef.current.removeLayer(osiLayerRef.current);
+          osiLayerRef.current = null;
+        }
       }
-    } else {
-      // Remove OSI layer overlay
-      if (osiLayerRef.current && mapRef.current.hasLayer(osiLayerRef.current)) {
-        mapRef.current.removeLayer(osiLayerRef.current);
-        osiLayerRef.current = null;
-      }
-    }
+    };
+
+    updateLayer();
   }, [layerMode]);
 
   // 3. Update Markers (Optimized to not clear if not needed)
