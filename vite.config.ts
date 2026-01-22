@@ -14,11 +14,18 @@ export default defineConfig({
   },
   server: {
     proxy: {
-      // Proxy /odata requests to Copernicus to bypass CORS/Redirect issues
+      // 1. OData Proxy (For searching metadata)
       '/odata': {
         target: 'https://catalogue.dataspace.copernicus.eu',
         changeOrigin: true,
         secure: false,
+      },
+      // 2. Process API Proxy (For fetching images statelessly)
+      '/process-api': {
+        target: 'https://sh.dataspace.copernicus.eu/api/v1/process',
+        changeOrigin: true,
+        secure: false,
+        rewrite: (path) => path.replace(/^\/process-api/, ''),
       },
     },
   },

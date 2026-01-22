@@ -25,24 +25,91 @@ export const SecureImage = ({ src, alt, className }: SecureImageProps) => {
         setError(false);
 
         const token = await getCopernicusToken();
-        
-        // Append token to URL so it survives the 302 Redirect
-        // Browsers strip the Authorization header on cross-origin redirects
-        const separator = src.includes('?') ? '&' : '?';
-        const urlWithToken = `${src}${separator}access_token=${token}`;
 
-        const response = await fetch(urlWithToken);
+        // ✅ HANDLE PROCESS COMMAND
+        // Format: PROCESS|PLATFORM|ID|BBOX|DATE
+        if (src.startsWith('PROCESS|')) {
+          const parts = src.split('|');
+          if (parts.length < 5) throw new Error("Invalid Process Command");
+          
+          const [_, platform, id, bboxStr, dateStr] = parts;
+          const bbox = bboxStr.split(',').map(Number);
+          
+          // Calculate precise time window (+/- 2 minutes) to isolate the image
+          const date = new Date(dateStr);
+          const start = new Date(date.getTime() - 120000).toISOString();
+          const end = new Date(date.getTime() + 120000).toISOString();
 
-        if (!response.ok) {
-          throw new Error(`Failed to load: ${response.statusText}`);
+          // Standard Sentinel Hub V3 Evalscripts
+          const evalscriptSAR = `
+            //VERSION=3
+            function setup() { return { input: ["VV"], output: { bands: 3 } }; }
+            function evaluatePixel(sample) { 
+              // Simple grayscale visualization for radar
+              var val = 2.5 * sample.VV; 
+              return [val, val, val]; 
+            }
+          `;
+          
+          const evalscriptOptical = `
+            //VERSION=3
+            function setup() { return { input: ["B04", "B03", "B02"], output: { bands: 3 } }; }
+            function evaluatePixel(sample) { 
+              // True color (RGB) gain adjusted
+              return [2.5 * sample.B04, 2.5 * sample.B03, 2.5 * sample.B02]; 
+            }
+          `;
+
+          const body = {
+            input: {
+              bounds: {
+                bbox: bbox,
+                properties: { crs: "http://www.opengis.net/def/crs/EPSG/0/4326" }
+              },
+              data: [
+                {
+                  type: platform === 'SENTINEL-1' ? 'sentinel-1-grd' : 'sentinel-2-l2a',
+                  dataFilter: {
+                    timeRange: { from: start, to: end },
+                    mosaickingOrder: "leastRecent"
+                  }
+                }
+              ]
+            },
+            output: {
+              width: 512,
+              height: 340,
+              responses: [{ identifier: "default", format: { type: "image/jpeg" } }]
+            },
+            evalscript: platform === 'SENTINEL-1' ? evalscriptSAR : evalscriptOptical
+          };
+
+          const response = await fetch('/process-api', {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${token}`,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(body)
+          });
+
+          if (!response.ok) {
+            const errText = await response.text();
+            console.error("Process API Error:", errText);
+            throw new Error(`Process API Error: ${response.status}`);
+          }
+          
+          const blob = await response.blob();
+          if (isMounted) {
+            objectUrl = URL.createObjectURL(blob);
+            setImageUrl(objectUrl);
+          }
+        } 
+        // FALLBACK: Standard URL
+        else {
+           setImageUrl(src); 
         }
 
-        const blob = await response.blob();
-        
-        if (isMounted) {
-          objectUrl = URL.createObjectURL(blob);
-          setImageUrl(objectUrl);
-        }
       } catch (err) {
         console.error('Error loading secure image:', err);
         if (isMounted) setError(true);
@@ -59,22 +126,8 @@ export const SecureImage = ({ src, alt, className }: SecureImageProps) => {
     };
   }, [src]);
 
-  if (loading) {
-    return (
-      <div className={`flex items-center justify-center bg-gray-100 animate-pulse ${className}`}>
-        <ImageIcon className="w-8 h-8 text-gray-400" />
-      </div>
-    );
-  }
-
-  if (error || !imageUrl) {
-    return (
-      <div className={`flex flex-col items-center justify-center bg-gray-100 text-gray-400 ${className}`}>
-        <AlertCircle className="w-8 h-8 mb-2" />
-        <span className="text-xs">Unavailable</span>
-      </div>
-    );
-  }
+  if (loading) return <div className={`flex items-center justify-center bg-gray-100 animate-pulse ${className}`}><ImageIcon className="text-gray-400" /></div>;
+  if (error || !imageUrl) return <div className={`flex items-center justify-center bg-gray-100 text-gray-400 ${className}`}><AlertCircle className="w-6 h-6" /></div>;
 
   return <img src={imageUrl} alt={alt} className={className} />;
 };

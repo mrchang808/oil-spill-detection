@@ -26,12 +26,26 @@ const DetectionDetailsModal: React.FC<DetectionDetailsModalProps> = ({ detection
   }, [detection]);
 
   const handleSecurePreview = async (url: string, title: string) => {
+    // If it's a PROCESS tag, we can't easily open it in a new tab without fetching it first
+    // For simplicity, we'll alert the user or implement a lightweight modal later.
+    // For now, let's just log it or show a toast.
+    if (url.startsWith('PROCESS:')) {
+      alert("Please view the image in the thumbnail grid below. Full-screen preview for Process API is coming soon.");
+      return;
+    }
+
     try {
-      const token = await getCopernicusToken(); // Ensure you have this imported
+      const token = await getCopernicusToken();
       
-      // Use query param for token instead of header
-      const separator = url.includes('?') ? '&' : '?';
-      const urlWithToken = `${url}${separator}access_token=${token}`;
+      // 1. FORCE PROXY logic
+      let fetchUrl = url;
+      if (import.meta.env.DEV && url.includes('catalogue.dataspace.copernicus.eu')) {
+        fetchUrl = url.replace('https://catalogue.dataspace.copernicus.eu', '');
+      }
+
+      // 2. FORCE TOKEN IN URL logic
+      const separator = fetchUrl.includes('?') ? '&' : '?';
+      const urlWithToken = `${fetchUrl}${separator}access_token=${token}`;
       
       const response = await fetch(urlWithToken);
       
@@ -53,7 +67,7 @@ const DetectionDetailsModal: React.FC<DetectionDetailsModalProps> = ({ detection
       alert("Could not load secure preview. The satellite data might be archived or offline.");
     }
   };
-
+  
   const loadSatelliteImagery = async () => {
     if (!detection) return;
     
