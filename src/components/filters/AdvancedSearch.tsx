@@ -9,55 +9,51 @@ interface AdvancedSearchProps {
 
 const AdvancedSearch: React.FC<AdvancedSearchProps> = ({ onSearch, onExport }) => {
   const [isExpanded, setIsExpanded] = useState(false);
+  const [localSearchText, setLocalSearchText] = useState('');
   
-  // ✅ FIXED: Create initial dates ONCE using useMemo
-  const initialDates = useMemo(() => ({
-    start: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000), // 30 days ago
-    end: new Date()
-  }), []); // Empty deps = created once, never changes
-
-  // ✅ FIXED: Use the memoized dates
-  const [filters, setFilters] = useState<SearchFilters>({
+  // Initial state for filters
+  const initialFilters: SearchFilters = useMemo(() => ({
     status: 'all',
     severity: [],
     responseStatus: [],
     validationStatus: [],
-    // ✅ Comment out dateRange by default to prevent infinite loops
-    // Uncomment if you want date filtering:
-    // dateRange: initialDates,
     searchText: '',
     tags: []
-  });
+  }), []);
 
+  const [filters, setFilters] = useState<SearchFilters>(initialFilters);
   const [locationSearch, setLocationSearch] = useState('');
   const [radius, setRadius] = useState(50);
   const [tagInput, setTagInput] = useState('');
 
-  const severityOptions = ['Low', 'Medium', 'High', 'Critical'];
-  const responseOptions = ['Pending', 'Investigating', 'Responding', 'Contained', 'Cleaned'];
-  const validationOptions = ['Unverified', 'Verified', 'False Positive'];
-
-  // ✅ FIXED: Debounce to prevent too many calls
+  // 1. DEBOUNCE TEXT SEARCH ONLY (Prevents loop on typing)
   useEffect(() => {
-    const debounceTimer = setTimeout(() => {
-      console.log('🔍 AdvancedSearch calling onSearch with filters:', filters);
-      onSearch(filters);
-    }, 300);
+    const timer = setTimeout(() => {
+      // Only trigger if text actually changed from what's in filters
+      if (localSearchText !== filters.searchText) {
+        const newFilters = { ...filters, searchText: localSearchText };
+        setFilters(newFilters);
+        onSearch(newFilters);
+      }
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [localSearchText]); // Only depend on local text state
 
-    return () => clearTimeout(debounceTimer);
-  }, [filters, onSearch]); // This is OK now because filters won't change unless user acts
+  // 2. IMMEDIATE UPDATE HELPER (For buttons/selects)
+  const updateFilters = (newFilters: SearchFilters) => {
+    setFilters(newFilters);
+    onSearch(newFilters); // Trigger App update immediately
+  };
 
   const handleLocationSearch = async () => {
     if (!locationSearch) return;
-    
     try {
       const response = await fetch(
         `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(locationSearch)}`
       );
       const data = await response.json();
-      
       if (data && data[0]) {
-        setFilters({
+        updateFilters({
           ...filters,
           location: {
             lat: parseFloat(data[0].lat),
@@ -71,18 +67,18 @@ const AdvancedSearch: React.FC<AdvancedSearchProps> = ({ onSearch, onExport }) =
     }
   };
 
-  const toggleArrayFilter = (array: string[], value: string, key: keyof SearchFilters) => {
-    const current = filters[key] as string[] || [];
+  const toggleArrayFilter = (array: string[] | undefined, value: string, key: keyof SearchFilters) => {
+    const current = array || [];
     const updated = current.includes(value)
       ? current.filter(v => v !== value)
       : [...current, value];
     
-    setFilters({ ...filters, [key]: updated });
+    updateFilters({ ...filters, [key]: updated });
   };
 
   const addTag = () => {
     if (tagInput && !filters.tags?.includes(tagInput)) {
-      setFilters({
+      updateFilters({
         ...filters,
         tags: [...(filters.tags || []), tagInput]
       });
@@ -91,38 +87,21 @@ const AdvancedSearch: React.FC<AdvancedSearchProps> = ({ onSearch, onExport }) =
   };
 
   const removeTag = (tag: string) => {
-    setFilters({
+    updateFilters({
       ...filters,
       tags: filters.tags?.filter(t => t !== tag) || []
     });
   };
 
   const clearFilters = () => {
-    setFilters({
-      status: 'all',
-      severity: [],
-      responseStatus: [],
-      validationStatus: [],
-      // ✅ Keep dateRange cleared to prevent loops
-      // dateRange: initialDates,
-      searchText: '',
-      tags: []
-    });
+    setLocalSearchText('');
     setLocationSearch('');
+    updateFilters(initialFilters);
   };
 
-  // ✅ NEW: Handler to set date range (only when user explicitly changes it)
-  const handleDateRangeChange = (startOrEnd: 'start' | 'end', value: string) => {
-    const newDate = new Date(value);
-    
-    setFilters({
-      ...filters,
-      dateRange: {
-        start: startOrEnd === 'start' ? newDate : (filters.dateRange?.start || initialDates.start),
-        end: startOrEnd === 'end' ? newDate : (filters.dateRange?.end || initialDates.end)
-      }
-    });
-  };
+  const severityOptions = ['Low', 'Medium', 'High', 'Critical'];
+  const responseOptions = ['Pending', 'Investigating', 'Responding', 'Contained', 'Cleaned'];
+  const validationOptions = ['Unverified', 'Verified', 'False Positive'];
 
   return (
     <div className="bg-white rounded-lg shadow-lg p-6 mb-4">
@@ -132,9 +111,9 @@ const AdvancedSearch: React.FC<AdvancedSearchProps> = ({ onSearch, onExport }) =
           <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
           <input
             type="text"
-            placeholder="Search by keywords, notes, or product ID..."
-            value={filters.searchText}
-            onChange={(e) => setFilters({ ...filters, searchText: e.target.value })}
+            placeholder="Search by keywords..."
+            value={localSearchText}
+            onChange={(e) => setLocalSearchText(e.target.value)}
             className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
           />
         </div>
@@ -158,34 +137,6 @@ const AdvancedSearch: React.FC<AdvancedSearchProps> = ({ onSearch, onExport }) =
       {/* Expanded Filters */}
       {isExpanded && (
         <div className="space-y-4 pt-4 border-t border-gray-200">
-          {/* Date Range - Optional, only set when user explicitly changes */}
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Start Date (Optional)</label>
-              <div className="relative">
-                <Calendar className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
-                <input
-                  type="date"
-                  value={filters.dateRange?.start.toISOString().split('T')[0] || ''}
-                  onChange={(e) => e.target.value && handleDateRangeChange('start', e.target.value)}
-                  className="w-full pl-10 pr-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-                />
-              </div>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">End Date (Optional)</label>
-              <div className="relative">
-                <Calendar className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
-                <input
-                  type="date"
-                  value={filters.dateRange?.end.toISOString().split('T')[0] || ''}
-                  onChange={(e) => e.target.value && handleDateRangeChange('end', e.target.value)}
-                  className="w-full pl-10 pr-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-                />
-              </div>
-            </div>
-          </div>
-
           {/* Location Search */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Location Search</label>
@@ -220,36 +171,19 @@ const AdvancedSearch: React.FC<AdvancedSearchProps> = ({ onSearch, onExport }) =
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">Detection Status</label>
             <div className="flex gap-2">
-              <button
-                onClick={() => setFilters({ ...filters, status: 'all' })}
-                className={`px-4 py-2 rounded-lg transition-colors ${
-                  filters.status === 'all' 
-                    ? 'bg-blue-600 text-white' 
-                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                }`}
-              >
-                All
-              </button>
-              <button
-                onClick={() => setFilters({ ...filters, status: 'Oil spill' })}
-                className={`px-4 py-2 rounded-lg transition-colors ${
-                  filters.status === 'Oil spill' 
-                    ? 'bg-red-600 text-white' 
-                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                }`}
-              >
-                Oil Spill
-              </button>
-              <button
-                onClick={() => setFilters({ ...filters, status: 'Non Oil spill' })}
-                className={`px-4 py-2 rounded-lg transition-colors ${
-                  filters.status === 'Non Oil spill' 
-                    ? 'bg-green-600 text-white' 
-                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                }`}
-              >
-                Non Oil Spill
-              </button>
+              {['all', 'Oil spill', 'Non Oil spill'].map((status) => (
+                <button
+                  key={status}
+                  onClick={() => updateFilters({ ...filters, status: status as any })}
+                  className={`px-4 py-2 rounded-lg transition-colors capitalize ${
+                    filters.status === status 
+                      ? 'bg-blue-600 text-white' 
+                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                  }`}
+                >
+                  {status}
+                </button>
+              ))}
             </div>
           </div>
 
@@ -260,54 +194,12 @@ const AdvancedSearch: React.FC<AdvancedSearchProps> = ({ onSearch, onExport }) =
               {severityOptions.map(severity => (
                 <button
                   key={severity}
-                  onClick={() => toggleArrayFilter(filters.severity || [], severity, 'severity')}
+                  onClick={() => toggleArrayFilter(filters.severity, severity, 'severity')}
                   className={`px-3 py-1 rounded-lg text-sm transition-colors ${
-                    filters.severity?.includes(severity)
-                      ? 'bg-orange-600 text-white'
-                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                    filters.severity?.includes(severity) ? 'bg-orange-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
                   }`}
                 >
                   {severity}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Response Status Filter */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">Response Status</label>
-            <div className="flex flex-wrap gap-2">
-              {responseOptions.map(status => (
-                <button
-                  key={status}
-                  onClick={() => toggleArrayFilter(filters.responseStatus || [], status, 'responseStatus')}
-                  className={`px-3 py-1 rounded-lg text-sm transition-colors ${
-                    filters.responseStatus?.includes(status)
-                      ? 'bg-purple-600 text-white'
-                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                  }`}
-                >
-                  {status}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Validation Status Filter */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">Validation Status</label>
-            <div className="flex flex-wrap gap-2">
-              {validationOptions.map(status => (
-                <button
-                  key={status}
-                  onClick={() => toggleArrayFilter(filters.validationStatus || [], status, 'validationStatus')}
-                  className={`px-3 py-1 rounded-lg text-sm transition-colors ${
-                    filters.validationStatus?.includes(status)
-                      ? 'bg-teal-600 text-white'
-                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                  }`}
-                >
-                  {status}
                 </button>
               ))}
             </div>
@@ -325,39 +217,20 @@ const AdvancedSearch: React.FC<AdvancedSearchProps> = ({ onSearch, onExport }) =
                 onKeyPress={(e) => e.key === 'Enter' && addTag()}
                 className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
               />
-              <button
-                onClick={addTag}
-                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-              >
-                Add
-              </button>
+              <button onClick={addTag} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors">Add</button>
             </div>
             <div className="flex flex-wrap gap-2">
               {filters.tags?.map(tag => (
-                <span
-                  key={tag}
-                  className="inline-flex items-center gap-1 px-3 py-1 bg-blue-100 text-blue-800 rounded-full text-sm"
-                >
+                <span key={tag} className="inline-flex items-center gap-1 px-3 py-1 bg-blue-100 text-blue-800 rounded-full text-sm">
                   {tag}
-                  <button
-                    onClick={() => removeTag(tag)}
-                    className="hover:text-blue-600"
-                  >
-                    <X className="w-3 h-3" />
-                  </button>
+                  <button onClick={() => removeTag(tag)} className="hover:text-blue-600"><X className="w-3 h-3" /></button>
                 </span>
               ))}
             </div>
           </div>
 
-          {/* Clear Filters */}
           <div className="flex justify-end">
-            <button
-              onClick={clearFilters}
-              className="px-4 py-2 text-gray-600 hover:text-gray-800 transition-colors"
-            >
-              Clear All Filters
-            </button>
+            <button onClick={clearFilters} className="px-4 py-2 text-gray-600 hover:text-gray-800 transition-colors">Clear All Filters</button>
           </div>
         </div>
       )}
