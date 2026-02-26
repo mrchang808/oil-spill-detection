@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { X, ExternalLink, Satellite, Wind, Waves, AlertCircle, Calendar, MapPin, Tag, FileText, Image as ImageIcon } from 'lucide-react';
 import { OilSpillDetection, CopernicusProduct } from '../../types/oilSpill';
 import { findSatelliteImagery } from '../../services/copernicus/copernicusAPI';
@@ -16,16 +16,10 @@ const DetectionDetailsModal: React.FC<DetectionDetailsModalProps> = ({ detection
   const [editedData, setEditedData] = useState<Partial<OilSpillDetection>>({});
   const [satelliteImages, setSatelliteImages] = useState<{sar: CopernicusProduct[], optical: CopernicusProduct[]}>({ sar: [], optical: [] });
   const [loadingImages, setLoadingImages] = useState(false);
+  const [satelliteError, setSatelliteError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'overview' | 'satellite' | 'news'>('overview');
   const [previewImage, setPreviewImage] = useState<{url: string, title: string} | null>(null);
   const [loadingPreview, setLoadingPreview] = useState(false);
-
-  useEffect(() => {
-    if (detection) {
-      setEditedData(detection);
-      loadSatelliteImagery();
-    }
-  }, [detection]);
 
   const handleSecurePreview = async (url: string, title: string) => {
     setLoadingPreview(true);
@@ -36,14 +30,9 @@ const DetectionDetailsModal: React.FC<DetectionDetailsModalProps> = ({ detection
       // CASE A: Process API (Real Satellite Data)
       if (url.startsWith('PROCESS|')) {
         const parts = url.split('|');
-        const [_, platform, id, bboxStr, dateStr] = parts;
+        const [, platform, , bboxStr, dateStr] = parts;
         const bbox = bboxStr.split(',').map(Number);
         
-        // Time window for High Res
-        const date = new Date(dateStr);
-        const start = new Date(date.getTime() - 120000).toISOString(); // +/- 2 mins
-        const end = new Date(date.getTime() + 120000).toISOString();
-
         // Evalscripts (Same as SecureImage but maybe tuned for bigger screens)
         const evalscriptSAR = `
           //VERSION=3
@@ -56,31 +45,48 @@ const DetectionDetailsModal: React.FC<DetectionDetailsModalProps> = ({ detection
           function evaluatePixel(sample) { return [2.5 * sample.B04, 2.5 * sample.B03, 2.5 * sample.B02]; }
         `;
 
-        const body = {
-          input: {
-            bounds: { bbox: bbox, properties: { crs: "http://www.opengis.net/def/crs/EPSG/0/4326" } },
-            data: [{
-              type: platform === 'SENTINEL-1' ? 'sentinel-1-grd' : 'sentinel-2-l2a',
-              dataFilter: { timeRange: { from: start, to: end }, mosaickingOrder: "leastRecent" }
-            }]
-          },
-          output: {
-            width: 1024, // HIGHER RES for Preview
-            height: 768,
-            responses: [{ identifier: "default", format: { type: "image/jpeg" } }]
-          },
-          evalscript: platform === 'SENTINEL-1' ? evalscriptSAR : evalscriptOptical
-        };
+        const date = new Date(dateStr);
+        const windowsMs = [120000, 86400000, 3 * 86400000, 7 * 86400000];
+        let lastError: string | null = null;
 
-        const response = await fetch('/process-api', {
-          method: 'POST',
-          headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify(body)
-        });
+        for (const windowMs of windowsMs) {
+          const start = new Date(date.getTime() - windowMs).toISOString();
+          const end = new Date(date.getTime() + windowMs).toISOString();
 
-        if (!response.ok) throw new Error('Process API Failed');
-        const blob = await response.blob();
-        objectUrl = URL.createObjectURL(blob);
+          const body = {
+            input: {
+              bounds: { bbox: bbox, properties: { crs: "http://www.opengis.net/def/crs/EPSG/0/4326" } },
+              data: [{
+                type: platform === 'SENTINEL-1' ? 'sentinel-1-grd' : 'sentinel-2-l2a',
+                dataFilter: { timeRange: { from: start, to: end }, mosaickingOrder: "mostRecent" }
+              }]
+            },
+            output: {
+              width: 1024,
+              height: 768,
+              responses: [{ identifier: "default", format: { type: "image/jpeg" } }]
+            },
+            evalscript: platform === 'SENTINEL-1' ? evalscriptSAR : evalscriptOptical
+          };
+
+          const response = await fetch('/process-api', {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify(body)
+          });
+
+          if (response.ok) {
+            const blob = await response.blob();
+            objectUrl = URL.createObjectURL(blob);
+            break;
+          }
+
+          lastError = await response.text();
+        }
+
+        if (!objectUrl) {
+          throw new Error(lastError || 'Process API failed for all retry windows');
+        }
       } 
       // CASE B: Standard URL
       else {
@@ -99,16 +105,18 @@ const DetectionDetailsModal: React.FC<DetectionDetailsModalProps> = ({ detection
 
     } catch (e) {
       console.error("Preview failed", e);
-      alert("Could not generate high-res preview. The data might be offline.");
+      const message = e instanceof Error ? e.message : 'Unknown preview error';
+      alert(`Could not generate high-res preview. ${message}`);
     } finally {
       setLoadingPreview(false);
     }
   };
   
-  const loadSatelliteImagery = async () => {
+  const loadSatelliteImagery = useCallback(async () => {
     if (!detection) return;
     
     setLoadingImages(true);
+    setSatelliteError(null);
     try {
       const imagery = await findSatelliteImagery(
         detection.latitude,
@@ -118,10 +126,20 @@ const DetectionDetailsModal: React.FC<DetectionDetailsModalProps> = ({ detection
       setSatelliteImages(imagery);
     } catch (error) {
       console.error('Error loading satellite imagery:', error);
+      setSatelliteError(error instanceof Error ? error.message : 'Failed to load satellite imagery');
     } finally {
       setLoadingImages(false);
     }
-  };
+  }, [detection]);
+
+  useEffect(() => {
+    if (detection) {
+      setEditedData(detection);
+      setSatelliteImages({ sar: [], optical: [] });
+      setSatelliteError(null);
+      loadSatelliteImagery();
+    }
+  }, [detection, loadSatelliteImagery]);
 
   const handleSave = () => {
     if (detection) {
@@ -311,7 +329,7 @@ const DetectionDetailsModal: React.FC<DetectionDetailsModalProps> = ({ detection
                     <label className="block text-sm font-medium text-gray-700 mb-1">Severity</label>
                     <select
                       value={editedData.severity || ''}
-                      onChange={(e) => setEditedData({...editedData, severity: e.target.value as any})}
+                      onChange={(e) => setEditedData({ ...editedData, severity: e.target.value as OilSpillDetection['severity'] })}
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
                     >
                       <option value="">Not set</option>
@@ -326,7 +344,7 @@ const DetectionDetailsModal: React.FC<DetectionDetailsModalProps> = ({ detection
                     <label className="block text-sm font-medium text-gray-700 mb-1">Response Status</label>
                     <select
                       value={editedData.response_status || ''}
-                      onChange={(e) => setEditedData({...editedData, response_status: e.target.value as any})}
+                      onChange={(e) => setEditedData({ ...editedData, response_status: e.target.value as OilSpillDetection['response_status'] })}
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
                     >
                       <option value="Pending">Pending</option>
@@ -341,7 +359,7 @@ const DetectionDetailsModal: React.FC<DetectionDetailsModalProps> = ({ detection
                     <label className="block text-sm font-medium text-gray-700 mb-1">Validation Status</label>
                     <select
                       value={editedData.validation_status || ''}
-                      onChange={(e) => setEditedData({...editedData, validation_status: e.target.value as any})}
+                      onChange={(e) => setEditedData({ ...editedData, validation_status: e.target.value as OilSpillDetection['validation_status'] })}
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
                     >
                       <option value="Unverified">Unverified</option>
@@ -422,6 +440,11 @@ const DetectionDetailsModal: React.FC<DetectionDetailsModalProps> = ({ detection
                 <div className="text-center py-8"><div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div></div>
               ) : (
                 <>
+                  {satelliteError && (
+                    <div className="border border-red-200 bg-red-50 text-red-700 px-4 py-3 rounded-lg text-sm">
+                      {satelliteError}
+                    </div>
+                  )}
                   {/* SAR Images */}
                   <div>
                     <h3 className="font-semibold text-gray-700 mb-4 flex items-center gap-2"><Satellite className="w-4 h-4" /> Sentinel-1 SAR</h3>
@@ -555,7 +578,13 @@ const DetectionDetailsModal: React.FC<DetectionDetailsModalProps> = ({ detection
           <div className="w-full max-w-7xl flex justify-between items-center text-white mb-4 px-4">
             <h3 className="text-lg font-medium truncate flex-1">{previewImage.title}</h3>
             <button 
-              onClick={() => setPreviewImage(null)}
+              onClick={() => {
+                // ✅ Cleanup blob URL to prevent memory leak
+                if (previewImage.url.startsWith('blob:')) {
+                  URL.revokeObjectURL(previewImage.url);
+                }
+                setPreviewImage(null);
+              }}
               className="p-2 bg-white/10 hover:bg-white/20 rounded-full transition-colors ml-4"
             >
               <X className="w-8 h-8" />

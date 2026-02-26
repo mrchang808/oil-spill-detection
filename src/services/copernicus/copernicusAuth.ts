@@ -11,6 +11,10 @@ interface TokenResponse {
   token_type: string;
 }
 
+const COPERNICUS_TOKEN_URL = import.meta.env.DEV
+  ? '/copernicus-auth'
+  : 'https://identity.dataspace.copernicus.eu/auth/realms/CDSE/protocol/openid-connect/token';
+
 export class CopernicusAuth {
   private static accessToken: string | null = null;
   private static tokenExpiry: number = 0;
@@ -59,20 +63,17 @@ export class CopernicusAuth {
     }
 
     try {
-      const response = await fetch(
-        'https://identity.dataspace.copernicus.eu/auth/realms/CDSE/protocol/openid-connect/token',
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/x-www-form-urlencoded',
-          },
-          body: new URLSearchParams({
-            grant_type: 'client_credentials',
-            client_id: clientId,
-            client_secret: clientSecret,
-          }),
-        }
-      );
+      const response = await fetch(COPERNICUS_TOKEN_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: new URLSearchParams({
+          grant_type: 'client_credentials',
+          client_id: clientId,
+          client_secret: clientSecret,
+        }),
+      });
 
       if (!response.ok) {
         const errorText = await response.text();
@@ -88,6 +89,9 @@ export class CopernicusAuth {
       return this.accessToken;
     } catch (error) {
       console.error('❌ Copernicus authentication error:', error);
+      if (error instanceof TypeError && import.meta.env.DEV) {
+        console.error('ℹ️ In development, ensure Vite dev server is running so /copernicus-auth proxy is active.');
+      }
       throw error;
     }
   }

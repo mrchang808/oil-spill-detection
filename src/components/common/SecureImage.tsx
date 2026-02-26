@@ -32,7 +32,7 @@ export const SecureImage = ({ src, alt, className }: SecureImageProps) => {
           const parts = src.split('|');
           if (parts.length < 5) throw new Error("Invalid Process Command");
           
-          const [_, platform, id, bboxStr, dateStr] = parts;
+          const [, platform, , bboxStr, dateStr] = parts;
           const bbox = bboxStr.split(',').map(Number);
           
           // Calculate precise time window (+/- 2 minutes) to isolate the image

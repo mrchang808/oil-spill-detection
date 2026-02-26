@@ -100,7 +100,7 @@ const StatusMessage: React.FC = () => {
     }, 2000);
 
     return () => clearInterval(interval);
-  }, []);
+  }, [messages.length]);
 
   return (
     <div className="h-6 overflow-hidden">

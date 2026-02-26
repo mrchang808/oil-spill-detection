@@ -24,6 +24,25 @@ interface UseDetectionsReturn {
   };
 }
 
+const calculateDistance = (
+  lat1: number,
+  lon1: number,
+  lat2: number,
+  lon2: number
+): number => {
+  const R = 6371;
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLon = ((lon2 - lon1) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos((lat1 * Math.PI) / 180) *
+      Math.cos((lat2 * Math.PI) / 180) *
+      Math.sin(dLon / 2) *
+      Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
+};
+
 /**
  * Custom hook for managing oil spill detections
  * ✅ FIXED - Prevents infinite loops
@@ -173,28 +192,6 @@ export const useDetections = (options: UseDetectionsOptions = {}): UseDetections
   );
 
   /**
-   * Calculate distance between two coordinates
-   */
-  const calculateDistance = (
-    lat1: number,
-    lon1: number,
-    lat2: number,
-    lon2: number
-  ): number => {
-    const R = 6371;
-    const dLat = ((lat2 - lat1) * Math.PI) / 180;
-    const dLon = ((lon2 - lon1) * Math.PI) / 180;
-    const a =
-      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-      Math.cos((lat1 * Math.PI) / 180) *
-        Math.cos((lat2 * Math.PI) / 180) *
-        Math.sin(dLon / 2) *
-        Math.sin(dLon / 2);
-    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-    return R * c;
-  };
-
-  /**
    * Compute statistics
    */
   const stats = useMemo(() => {
@@ -210,22 +207,12 @@ export const useDetections = (options: UseDetectionsOptions = {}): UseDetections
   }, [detections]);
 
   /**
-   * ✅ Initial fetch - Only runs once on mount
+   * ✅ Fetch on mount and when filters change
    */
   useEffect(() => {
-    console.log('🔄 Initial fetch triggered');
+    console.log('🔄 Fetch triggered (mount or filters changed)');
     fetchDetections();
-  }, []); // ← Empty deps = runs once
-
-  /**
-   * ✅ Re-fetch when filters change
-   */
-  useEffect(() => {
-    if (!loading) { // Only if not already loading
-      console.log('🔄 Filters changed, re-fetching...');
-      fetchDetections();
-    }
-  }, [filters?.status, filters?.severity, filters?.searchText]); // Only specific filter fields
+  }, [fetchDetections]);
 
   /**
    * ✅ Set up real-time subscription
@@ -286,7 +273,7 @@ export const useDetections = (options: UseDetectionsOptions = {}): UseDetections
       console.log('⏰ Clearing auto-refresh');
       clearInterval(interval);
     };
-  }, [autoRefresh, refreshInterval]); // ← Don't include fetchDetections!
+  }, [autoRefresh, refreshInterval, fetchDetections]);
 
   return {
     detections,

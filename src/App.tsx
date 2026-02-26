@@ -31,11 +31,8 @@ function App() {
   const {
     detections,
     loading,
-    error,
     refetch,
     updateDetection,
-    deleteDetection,
-    stats: detectionsStats,
   } = useDetections({
     filters: searchFilters,
     autoRefresh: false,
@@ -138,7 +135,7 @@ function App() {
   useEffect(() => {
     console.log('📊 Fetching statistics (once on mount)');
     fetchStatistics();
-  }, []);
+  }, [fetchStatistics]);
 
   if (loading && detections.length === 0) {
     return <LoadingScreen message="Loading Detections" />;

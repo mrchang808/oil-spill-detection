@@ -26,6 +26,8 @@ const OilSpillMap: React.FC<OilSpillMapProps> = ({
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const markersRef = useRef<L.LayerGroup | null>(null);
   const osiLayerRef = useRef<L.TileLayer | null>(null);
+  const initialCenterRef = useRef<[number, number]>(initialCenter);
+  const initialZoomRef = useRef<number>(initialZoom);
   const [isLoading, setIsLoading] = useState(true);
   const [layerMode, setLayerMode] = useState<'natural' | 'osi'>('natural');
 
@@ -34,8 +36,8 @@ const OilSpillMap: React.FC<OilSpillMapProps> = ({
     if (!mapContainerRef.current || mapRef.current) return;
 
     const map = L.map(mapContainerRef.current, {
-      center: initialCenter,
-      zoom: initialZoom,
+      center: initialCenterRef.current,
+      zoom: initialZoomRef.current,
       zoomControl: true,
       attributionControl: true,
       preferCanvas: true,
@@ -75,7 +77,7 @@ const OilSpillMap: React.FC<OilSpillMapProps> = ({
         // ✅ Safety Check: Only invalidate if map container is still in DOM
         try {
           mapRef.current.invalidateSize();
-        } catch (e) {
+        } catch {
           // Ignore resize errors during unmount
         }
       }
@@ -155,6 +157,7 @@ const OilSpillMap: React.FC<OilSpillMapProps> = ({
       
       div.querySelector(`#btn-${d.id}`)?.addEventListener('click', (e) => {
         e.stopPropagation();
+        onMarkerClick?.(d);
         window.dispatchEvent(new CustomEvent('marker-details-click', { detail: d.id }));
       });
 
@@ -162,7 +165,7 @@ const OilSpillMap: React.FC<OilSpillMapProps> = ({
       marker.addTo(group);
     });
 
-  }, [detections, showOilSpills, showNonOilSpills]);
+  }, [detections, showOilSpills, showNonOilSpills, onMarkerClick]);
 
   return (
     <div className="relative w-full h-full">
@@ -171,7 +174,7 @@ const OilSpillMap: React.FC<OilSpillMapProps> = ({
       <div className="absolute top-4 left-14 z-[1000] bg-white rounded-lg shadow-lg p-2">
         <select 
           value={layerMode} 
-          onChange={(e) => setLayerMode(e.target.value as any)}
+          onChange={(e) => setLayerMode(e.target.value as 'natural' | 'osi')}
           className="text-sm border-none focus:ring-0 cursor-pointer"
         >
           <option value="natural">Natural Color</option>

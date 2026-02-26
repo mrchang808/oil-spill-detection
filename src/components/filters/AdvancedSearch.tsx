@@ -1,6 +1,7 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import { Search, Calendar, MapPin, Filter, X, Download } from 'lucide-react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { Search, MapPin, Filter, X, Download } from 'lucide-react';
 import { SearchFilters } from '../../types/oilSpill';
+import MLPipelineTrigger from '../ml/MLPipelineTrigger';
 
 interface AdvancedSearchProps {
   onSearch: (filters: SearchFilters) => void;
@@ -25,15 +26,25 @@ const AdvancedSearch: React.FC<AdvancedSearchProps> = ({ onSearch, onExport }) =
   const [locationSearch, setLocationSearch] = useState('');
   const [radius, setRadius] = useState(50);
   const [tagInput, setTagInput] = useState('');
+  const filtersRef = useRef(filters);
+  const onSearchRef = useRef(onSearch);
+
+  useEffect(() => {
+    filtersRef.current = filters;
+  }, [filters]);
+
+  useEffect(() => {
+    onSearchRef.current = onSearch;
+  }, [onSearch]);
 
   // 1. DEBOUNCE TEXT SEARCH ONLY (Prevents loop on typing)
   useEffect(() => {
     const timer = setTimeout(() => {
       // Only trigger if text actually changed from what's in filters
-      if (localSearchText !== filters.searchText) {
-        const newFilters = { ...filters, searchText: localSearchText };
+      if (localSearchText !== filtersRef.current.searchText) {
+        const newFilters = { ...filtersRef.current, searchText: localSearchText };
         setFilters(newFilters);
-        onSearch(newFilters);
+        onSearchRef.current(newFilters);
       }
     }, 500);
     return () => clearTimeout(timer);
@@ -100,8 +111,7 @@ const AdvancedSearch: React.FC<AdvancedSearchProps> = ({ onSearch, onExport }) =
   };
 
   const severityOptions = ['Low', 'Medium', 'High', 'Critical'];
-  const responseOptions = ['Pending', 'Investigating', 'Responding', 'Contained', 'Cleaned'];
-  const validationOptions = ['Unverified', 'Verified', 'False Positive'];
+  const statusOptions: SearchFilters['status'][] = ['all', 'Oil spill', 'Non Oil spill'];
 
   return (
     <div className="bg-white rounded-lg shadow-lg p-6 mb-4">
@@ -171,10 +181,10 @@ const AdvancedSearch: React.FC<AdvancedSearchProps> = ({ onSearch, onExport }) =
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">Detection Status</label>
             <div className="flex gap-2">
-              {['all', 'Oil spill', 'Non Oil spill'].map((status) => (
+              {statusOptions.map((status) => (
                 <button
                   key={status}
-                  onClick={() => updateFilters({ ...filters, status: status as any })}
+                  onClick={() => updateFilters({ ...filters, status })}
                   className={`px-4 py-2 rounded-lg transition-colors capitalize ${
                     filters.status === status 
                       ? 'bg-blue-600 text-white' 
@@ -227,6 +237,11 @@ const AdvancedSearch: React.FC<AdvancedSearchProps> = ({ onSearch, onExport }) =
                 </span>
               ))}
             </div>
+          </div>
+
+          {/* ML Pipeline Integration */}
+          <div className="pt-4 border-t border-gray-200">
+            <MLPipelineTrigger />
           </div>
 
           <div className="flex justify-end">

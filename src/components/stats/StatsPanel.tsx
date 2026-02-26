@@ -1,5 +1,5 @@
 import { AlertCircle, CheckCircle, Database } from 'lucide-react';
-import { OilSpillDetection } from '../lib/supabase';
+import { OilSpillDetection } from '../../types/oilSpill';
 
 interface StatsPanelProps {
   detections: OilSpillDetection[];

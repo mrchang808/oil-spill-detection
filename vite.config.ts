@@ -27,6 +27,17 @@ export default defineConfig({
         secure: false,
         rewrite: (path) => path.replace(/^\/process-api/, ''),
       },
+      // 3. Copernicus Auth Proxy (avoids browser CORS)
+      '/copernicus-auth': {
+        target: 'https://identity.dataspace.copernicus.eu',
+        changeOrigin: true,
+        secure: false,
+        rewrite: (path) =>
+          path.replace(
+            /^\/copernicus-auth/,
+            '/auth/realms/CDSE/protocol/openid-connect/token'
+          ),
+      },
       '/wms': {
         target: 'https://sh.dataspace.copernicus.eu',
         changeOrigin: true,
