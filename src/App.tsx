@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useMemo } from 'react';
-import { Waves, RefreshCw, BarChart3, Bell } from 'lucide-react';
+import { Waves, RefreshCw, BarChart3, Bell, Play, Pause } from 'lucide-react';
 import OilSpillMap from './components/map/OilSpillMap';
 import StatsPanel from './components/stats/StatsPanel';
 import FilterControls from './components/filters/FilterControls';
@@ -27,6 +27,8 @@ function App() {
   const [globalStatistics, setGlobalStatistics] = useState<Statistics | null>(null);
   const [notifications, setNotifications] = useState<string[]>([]);
   const [showStats, setShowStats] = useState(false);
+  const [isTimelinePlaying, setIsTimelinePlaying] = useState(false);
+  const [timelineProgressPercent, setTimelineProgressPercent] = useState(100);
 
   const {
     detections,
@@ -125,12 +127,85 @@ function App() {
   }, [refetch, fetchStatistics]);
 
   const filteredDetections = useMemo(() => {
-    return detections.filter(detection => {
+    const statusFiltered = detections.filter(detection => {
       if (detection.status === 'Oil spill') return showOilSpills;
       if (detection.status === 'Non Oil spill') return showNonOilSpills;
       return false;
     });
-  }, [detections, showOilSpills, showNonOilSpills]);
+
+    const timestamps = detections
+      .map((d) => new Date(d.detected_at).getTime())
+      .filter((time) => Number.isFinite(time));
+
+    if (timestamps.length === 0) {
+      return statusFiltered;
+    }
+
+    const timelineEndMs = Math.max(...timestamps);
+    const timelineStartMs = Math.min(...timestamps);
+    const currentTimelineMs = timelineStartMs + ((timelineEndMs - timelineStartMs) * timelineProgressPercent) / 100;
+
+    return statusFiltered.filter((detection) => {
+      const detectedMs = new Date(detection.detected_at).getTime();
+      
+      // Show detection only if timeline has reached its detection date
+      if (currentTimelineMs < detectedMs) {
+        return false;
+      }
+
+      // Calculate when the detection should disappear (duration in days)
+      const durationDays = detection.response_status === 'Cleaned' ? 0 : 60; // Cleaned = disappear immediately, else 60 days
+      const resolvedMs = detectedMs + (durationDays * 24 * 60 * 60 * 1000);
+
+      // Hide detection if timeline has passed its resolution time
+      if (currentTimelineMs > resolvedMs) {
+        return false;
+      }
+
+      return true;
+    });
+  }, [detections, showOilSpills, showNonOilSpills, timelineProgressPercent]);
+
+  const timelineBounds = useMemo(() => {
+    const timestamps = detections
+      .map((d) => new Date(d.detected_at).getTime())
+      .filter((time) => Number.isFinite(time));
+
+    if (timestamps.length === 0) {
+      const now = Date.now();
+      return {
+        start: new Date(now - 30 * 24 * 60 * 60 * 1000),
+        end: new Date(now),
+      };
+    }
+
+    const end = Math.max(...timestamps);
+    const start = Math.min(...timestamps); // Use actual minimum, not 30 days back
+    return { start: new Date(start), end: new Date(end) };
+  }, [detections]);
+
+  const currentTimelineDate = useMemo(() => {
+    const startMs = timelineBounds.start.getTime();
+    const endMs = timelineBounds.end.getTime();
+    return new Date(startMs + ((endMs - startMs) * timelineProgressPercent) / 100);
+  }, [timelineBounds, timelineProgressPercent]);
+
+  useEffect(() => {
+    if (!isTimelinePlaying) return;
+
+    const interval = setInterval(() => {
+      setTimelineProgressPercent((prev) => {
+        const next = prev + 3;
+        if (next >= 100) {
+          setIsTimelinePlaying(false);
+          return 100;
+        }
+        return next;
+      });
+    }, 400);
+
+    return () => clearInterval(interval);
+  }, [isTimelinePlaying]);
 
   useEffect(() => {
     console.log('📊 Fetching statistics (once on mount)');
@@ -276,6 +351,39 @@ function App() {
                   {filteredDetections.filter(d => d.status === 'Non Oil spill').length}
                 </div>
                 <div className="text-xs text-gray-600">Clear</div>
+              </div>
+            </div>
+          </div>
+
+          {/* Timeline Playback */}
+          <div className="absolute bottom-4 left-1/2 -translate-x-1/2 w-[min(900px,calc(100%-2rem))] bg-white/95 backdrop-blur rounded-xl shadow-lg p-4 z-[1000]">
+            <div className="flex items-center gap-4">
+              <button
+                onClick={() => setIsTimelinePlaying((prev) => !prev)}
+                className="w-10 h-10 rounded-full bg-blue-600 text-white flex items-center justify-center hover:bg-blue-700 transition-colors"
+                aria-label={isTimelinePlaying ? 'Pause timeline' : 'Play timeline'}
+              >
+                {isTimelinePlaying ? <Pause className="w-5 h-5" /> : <Play className="w-5 h-5 ml-0.5" />}
+              </button>
+
+              <div className="flex-1">
+                <input
+                  type="range"
+                  min={0}
+                  max={100}
+                  step={1}
+                  value={timelineProgressPercent}
+                  onChange={(e) => {
+                    setIsTimelinePlaying(false);
+                    setTimelineProgressPercent(Number(e.target.value));
+                  }}
+                  className="w-full"
+                />
+                <div className="flex justify-between text-xs text-gray-600 mt-1">
+                  <span>{timelineBounds.start.toLocaleDateString()}</span>
+                  <span className="font-medium">{currentTimelineDate.toLocaleDateString()}</span>
+                  <span>{timelineBounds.end.toLocaleDateString()}</span>
+                </div>
               </div>
             </div>
           </div>

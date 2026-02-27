@@ -1,0 +1,18 @@
+{
+  "input_file": "DARTIS_2019.tab",
+  "output_file": "DARTIS_2019_supabase_dedup.csv",
+  "total_input_rows": 5515,
+  "unique_sentinel_ids": 1181,
+  "dropped_duplicate_rows": 4334,
+  "skipped_missing_sentinel_id": 0,
+  "columns": [
+    "latitude",
+    "longitude",
+    "status",
+    "detected_at",
+    "source",
+    "copernicus_product_id",
+    "validation_status",
+    "notes"
+  ]
+}

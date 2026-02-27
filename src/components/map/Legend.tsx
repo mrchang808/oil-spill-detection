@@ -1,6 +1,6 @@
 const Legend = () => {
   return (
-    <div className="bg-white rounded-lg shadow-lg p-4 absolute bottom-8 left-8 z-[1000]">
+    <div className="bg-white rounded-lg shadow-lg p-4 absolute top-16 left-8 z-[1000]">
       <h3 className="font-semibold text-sm mb-3 text-gray-800">Detection Status</h3>
       <div className="space-y-2">
         <div className="flex items-center gap-3">

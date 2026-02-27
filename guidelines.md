@@ -331,6 +331,31 @@ Before opening a PR, verify all are true:
 - Map interactions + filters + modal flow are manually sanity-tested
 - Async cleanups (timers/object URLs/subscriptions) are present
 
+### K) Spill Lifecycle / Cleanse-Time Risks
+
+**Known Risk:** Timeline can become unrealistically cumulative if detections never expire or close.
+
+**Guardrails:**
+- Treat each spill as a time-bounded event, not a permanent marker.
+- Add/maintain explicit lifecycle fields for temporal validity (at minimum one of):
+  - `resolved_at` (preferred)
+  - `dissipated_at`
+  - `cleanup_completed_at`
+  - `valid_until` (fallback TTL)
+- Rendering rule must include both start and end bounds:
+  - show when `detected_at <= t`
+  - hide when `t > resolution_time`
+- Resolution time source priority should be deterministic and documented in code.
+- If no explicit resolution signal exists, use a configurable TTL policy per source/severity (not hardcoded magic constants).
+- Keep lifecycle logic scalable:
+  - compute effective resolution server-side when possible
+  - index temporal fields used for timeline queries
+  - avoid per-frame expensive recomputation for large datasets
+- Add QA checks for timeline realism:
+  - historical spills no longer visible years later unless explicitly unresolved
+  - cleaned/contained spills disappear according to policy
+  - playback at scale remains responsive
+
 ## 10) Done Criteria for Changes
 
 A change is considered ready when:
@@ -391,3 +416,52 @@ git push
 
 For Supabase CLI on Windows, do not use `npm install -g supabase`.
 Use supported install methods (Scoop/winget) or run via `npx`/`npm exec` where appropriate.
+
+## 12) Product Roadmap (High-Impact Upgrades)
+
+This roadmap is prioritized for fastest user value with lowest implementation risk.
+
+### Priority 1 — Timeline Playback (Map UX)
+
+- Add bottom map timeline slider with `Play/Pause`.
+- Show detections as lifecycle events (appear at detection time, disappear at computed resolution/cleanse time).
+- Keep playback lightweight (client-side filtering first, no backend changes required).
+
+### Priority 2 — Visual Analytics Dashboard
+
+- Replace text-only trend blocks with charts:
+  - spills by severity (pie)
+  - detections over time (bar/line)
+- Recommended library: `recharts`.
+- Keep chart data derivation in memoized selectors.
+
+### Priority 3 — Dark Mode (GIS usability)
+
+- Add UI theme toggle using existing Tailwind dark variants.
+- Add dark basemap option in Leaflet (e.g., CartoDB Dark Matter).
+- Persist theme in local storage.
+
+### Priority 4 — Weather/Wind Overlay (Operational context)
+
+- Integrate wind direction/speed near selected detection.
+- Draw a simple drift cone/arrow overlay for short-term spill movement estimate.
+- Start with read-only visualization before predictive modeling.
+
+### Priority 5 — AIS Vessel Context (Attribution workflow)
+
+- Add nearby vessel markers around spill coordinates + timestamp.
+- Optional: vessel track line history for context.
+- Prefer backend proxy + caching for provider limits and key protection.
+
+### Delivery Strategy
+
+- **Sprint 1:** Timeline + charts + dark mode.
+- **Sprint 2:** Weather drift overlay MVP.
+- **Sprint 3:** AIS pilot integration.
+
+### Architecture Guardrails for Roadmap Work
+
+- Keep third-party API logic in `src/services/*`.
+- Do not expose paid provider secrets in frontend.
+- Add feature flags for new map overlays to protect baseline UX.
+- Every roadmap feature must pass section 11 pre-push gate.
