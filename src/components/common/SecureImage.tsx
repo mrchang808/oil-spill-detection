@@ -26,84 +26,93 @@ export const SecureImage = ({ src, alt, className }: SecureImageProps) => {
 
         const token = await getCopernicusToken();
 
-        // ✅ HANDLE PROCESS COMMAND
+        // HANDLE PROCESS COMMAND
         // Format: PROCESS|PLATFORM|ID|BBOX|DATE
         if (src.startsWith('PROCESS|')) {
           const parts = src.split('|');
           if (parts.length < 5) throw new Error("Invalid Process Command");
-          
+
           const [, platform, , bboxStr, dateStr] = parts;
           const bbox = bboxStr.split(',').map(Number);
-          
-          // Calculate precise time window (+/- 2 minutes) to isolate the image
           const date = new Date(dateStr);
-          const start = new Date(date.getTime() - 120000).toISOString();
-          const end = new Date(date.getTime() + 120000).toISOString();
 
-          // Standard Sentinel Hub V3 Evalscripts
+          // SAR: log-scale stretch with nodata guard to avoid pure-black tiles
           const evalscriptSAR = `
             //VERSION=3
-            function setup() { return { input: ["VV"], output: { bands: 3 } }; }
-            function evaluatePixel(sample) { 
-              // Simple grayscale visualization for radar
-              var val = 2.5 * sample.VV; 
-              return [val, val, val]; 
-            }
-          `;
-          
-          const evalscriptOptical = `
-            //VERSION=3
-            function setup() { return { input: ["B04", "B03", "B02"], output: { bands: 3 } }; }
-            function evaluatePixel(sample) { 
-              // True color (RGB) gain adjusted
-              return [2.5 * sample.B04, 2.5 * sample.B03, 2.5 * sample.B02]; 
+            function setup() { return { input: ["VV", "dataMask"], output: { bands: 4 } }; }
+            function evaluatePixel(sample) {
+              if (sample.dataMask === 0) return [0.1, 0.1, 0.1, 0];
+              var val = Math.log(sample.VV * 100 + 1) / Math.log(101);
+              val = Math.min(1, Math.max(0, val * 2.2));
+              return [val, val, val, 1];
             }
           `;
 
-          const body = {
-            input: {
-              bounds: {
-                bbox: bbox,
-                properties: { crs: "http://www.opengis.net/def/crs/EPSG/0/4326" }
-              },
-              data: [
-                {
+          // Optical: true-colour with gamma + nodata guard to avoid pure-black tiles
+          const evalscriptOptical = `
+            //VERSION=3
+            function setup() { return { input: ["B04", "B03", "B02", "dataMask"], output: { bands: 4 } }; }
+            function evaluatePixel(sample) {
+              if (sample.dataMask === 0) return [0.1, 0.1, 0.15, 0];
+              var r = Math.pow(Math.min(1, sample.B04 * 3.5), 0.65);
+              var g = Math.pow(Math.min(1, sample.B03 * 3.5), 0.65);
+              var b = Math.pow(Math.min(1, sample.B02 * 3.5), 0.65);
+              return [r, g, b, 1];
+            }
+          `;
+
+          // Try progressively wider time windows until we get a valid response
+          const windowsMs = [3 * 86400000, 7 * 86400000, 14 * 86400000];
+          let lastErr = '';
+
+          for (const windowMs of windowsMs) {
+            const start = new Date(date.getTime() - windowMs).toISOString();
+            const end = new Date(date.getTime() + windowMs).toISOString();
+
+            const body = {
+              input: {
+                bounds: {
+                  bbox: bbox,
+                  properties: { crs: "http://www.opengis.net/def/crs/EPSG/0/4326" }
+                },
+                data: [{
                   type: platform === 'SENTINEL-1' ? 'sentinel-1-grd' : 'sentinel-2-l2a',
                   dataFilter: {
                     timeRange: { from: start, to: end },
-                    mosaickingOrder: "leastRecent"
+                    mosaickingOrder: "mostRecent"
                   }
-                }
-              ]
-            },
-            output: {
-              width: 512,
-              height: 340,
-              responses: [{ identifier: "default", format: { type: "image/jpeg" } }]
-            },
-            evalscript: platform === 'SENTINEL-1' ? evalscriptSAR : evalscriptOptical
-          };
+                }]
+              },
+              output: {
+                width: 512,
+                height: 340,
+                responses: [{ identifier: "default", format: { type: "image/png" } }]
+              },
+              evalscript: platform === 'SENTINEL-1' ? evalscriptSAR : evalscriptOptical
+            };
 
-          const response = await fetch('/process-api', {
-            method: 'POST',
-            headers: {
-              'Authorization': `Bearer ${token}`,
-              'Content-Type': 'application/json'
-            },
-            body: JSON.stringify(body)
-          });
+            const response = await fetch('/process-api', {
+              method: 'POST',
+              headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+              },
+              body: JSON.stringify(body)
+            });
 
-          if (!response.ok) {
-            const errText = await response.text();
-            console.error("Process API Error:", errText);
-            throw new Error(`Process API Error: ${response.status}`);
+            if (response.ok) {
+              const blob = await response.blob();
+              if (isMounted) {
+                objectUrl = URL.createObjectURL(blob);
+                setImageUrl(objectUrl);
+              }
+              break;
+            }
+
+            lastErr = `Process API ${response.status}`;
           }
-          
-          const blob = await response.blob();
-          if (isMounted) {
-            objectUrl = URL.createObjectURL(blob);
-            setImageUrl(objectUrl);
-          }
+
+          if (!objectUrl) throw new Error(lastErr || 'Process API failed for all retry windows');
         } 
         // FALLBACK: Standard URL
         else {

@@ -33,20 +33,31 @@ const DetectionDetailsModal: React.FC<DetectionDetailsModalProps> = ({ detection
         const [, platform, , bboxStr, dateStr] = parts;
         const bbox = bboxStr.split(',').map(Number);
         
-        // Evalscripts (Same as SecureImage but maybe tuned for bigger screens)
+        // Evalscripts — match SecureImage but at full preview resolution
         const evalscriptSAR = `
           //VERSION=3
-          function setup() { return { input: ["VV"], output: { bands: 3 } }; }
-          function evaluatePixel(sample) { var val = 2.5 * sample.VV; return [val, val, val]; }
+          function setup() { return { input: ["VV", "dataMask"], output: { bands: 4 } }; }
+          function evaluatePixel(sample) {
+            if (sample.dataMask === 0) return [0.1, 0.1, 0.1, 0];
+            var val = Math.log(sample.VV * 100 + 1) / Math.log(101);
+            val = Math.min(1, Math.max(0, val * 2.2));
+            return [val, val, val, 1];
+          }
         `;
         const evalscriptOptical = `
           //VERSION=3
-          function setup() { return { input: ["B04", "B03", "B02"], output: { bands: 3 } }; }
-          function evaluatePixel(sample) { return [2.5 * sample.B04, 2.5 * sample.B03, 2.5 * sample.B02]; }
+          function setup() { return { input: ["B04", "B03", "B02", "dataMask"], output: { bands: 4 } }; }
+          function evaluatePixel(sample) {
+            if (sample.dataMask === 0) return [0.1, 0.1, 0.15, 0];
+            var r = Math.pow(Math.min(1, sample.B04 * 3.5), 0.65);
+            var g = Math.pow(Math.min(1, sample.B03 * 3.5), 0.65);
+            var b = Math.pow(Math.min(1, sample.B02 * 3.5), 0.65);
+            return [r, g, b, 1];
+          }
         `;
 
         const date = new Date(dateStr);
-        const windowsMs = [120000, 86400000, 3 * 86400000, 7 * 86400000];
+        const windowsMs = [3 * 86400000, 7 * 86400000, 14 * 86400000, 30 * 86400000];
         let lastError: string | null = null;
 
         for (const windowMs of windowsMs) {
@@ -64,7 +75,7 @@ const DetectionDetailsModal: React.FC<DetectionDetailsModalProps> = ({ detection
             output: {
               width: 1024,
               height: 768,
-              responses: [{ identifier: "default", format: { type: "image/jpeg" } }]
+              responses: [{ identifier: "default", format: { type: "image/png" } }]
             },
             evalscript: platform === 'SENTINEL-1' ? evalscriptSAR : evalscriptOptical
           };
