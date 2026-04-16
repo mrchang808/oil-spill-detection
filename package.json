@@ -10,7 +10,8 @@
     "preview": "vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.app.json",
     "import:dartis:dry": "node --loader ts-node/esm src/scripts/import-dartis-csv.ts --dry-run",
-    "import:dartis": "node --loader ts-node/esm src/scripts/import-dartis-csv.ts"
+    "import:dartis": "node --loader ts-node/esm src/scripts/import-dartis-csv.ts",
+    "neft-dashlari": "node --loader ts-node/esm src/scripts/run-neft-dashlari-pipeline.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.81.1",

@@ -11,6 +11,7 @@ import { OilSpillDetection, SearchFilters, Statistics } from './types/oilSpill';
 import { ExportService } from './services/exportService';
 import LoadingScreen from './components/layout/LoadingScreen';
 import { useDetections } from './hooks/useDetections';
+import { refreshNeftDashlari } from './services/neftDashlariService';
 
 function App() {
   const [showOilSpills, setShowOilSpills] = useState(true);
@@ -28,7 +29,7 @@ function App() {
   const [notifications, setNotifications] = useState<string[]>([]);
   const [showStats, setShowStats] = useState(false);
   const [isTimelinePlaying, setIsTimelinePlaying] = useState(false);
-  const [timelineProgressPercent, setTimelineProgressPercent] = useState(100);
+  const [timelineDateIndex, setTimelineDateIndex] = useState(Number.MAX_SAFE_INTEGER);
 
   const {
     detections,
@@ -121,10 +122,29 @@ function App() {
   }, [detections]);
 
   const handleRefresh = useCallback(async () => {
+    try {
+      const count = await refreshNeftDashlari();
+      if (count > 0) {
+        addNotification(`Neft Dashlari: ${count} detection(s) updated`);
+      }
+    } catch (err) {
+      console.error('Neft Dashlari refresh failed:', err);
+    }
     await refetch();
-    await fetchStatistics(); // Also refresh statistics
+    await fetchStatistics();
     setLastRefresh(new Date());
-  }, [refetch, fetchStatistics]);
+  }, [refetch, fetchStatistics, addNotification]);
+
+  // Unique sorted detection dates — each one becomes a slider stop
+  const uniqueDates = useMemo(() => {
+    const dateSet = new Set(
+      detections.map(d => {
+        const dt = new Date(d.detected_at);
+        return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
+      })
+    );
+    return [...dateSet].sort();
+  }, [detections]);
 
   const filteredDetections = useMemo(() => {
     const statusFiltered = detections.filter(detection => {
@@ -133,79 +153,41 @@ function App() {
       return false;
     });
 
-    const timestamps = detections
-      .map((d) => new Date(d.detected_at).getTime())
-      .filter((time) => Number.isFinite(time));
+    if (uniqueDates.length === 0) return statusFiltered;
 
-    if (timestamps.length === 0) {
-      return statusFiltered;
-    }
+    const idx = Math.min(timelineDateIndex, uniqueDates.length - 1);
+    const selectedDate = uniqueDates[idx];
 
-    const timelineEndMs = Math.max(...timestamps);
-    const timelineStartMs = Math.min(...timestamps);
-    const currentTimelineMs = timelineStartMs + ((timelineEndMs - timelineStartMs) * timelineProgressPercent) / 100;
-
-    return statusFiltered.filter((detection) => {
-      const detectedMs = new Date(detection.detected_at).getTime();
-      
-      // Show detection only if timeline has reached its detection date
-      if (currentTimelineMs < detectedMs) {
-        return false;
-      }
-
-      // Calculate when the detection should disappear (duration in days)
-      const durationDays = detection.response_status === 'Cleaned' ? 0 : 60; // Cleaned = disappear immediately, else 60 days
-      const resolvedMs = detectedMs + (durationDays * 24 * 60 * 60 * 1000);
-
-      // Hide detection if timeline has passed its resolution time
-      if (currentTimelineMs > resolvedMs) {
-        return false;
-      }
-
-      return true;
+    return statusFiltered.filter(detection => {
+      const dt = new Date(detection.detected_at);
+      const dateStr = `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
+      return dateStr === selectedDate;
     });
-  }, [detections, showOilSpills, showNonOilSpills, timelineProgressPercent]);
-
-  const timelineBounds = useMemo(() => {
-    const timestamps = detections
-      .map((d) => new Date(d.detected_at).getTime())
-      .filter((time) => Number.isFinite(time));
-
-    if (timestamps.length === 0) {
-      const now = Date.now();
-      return {
-        start: new Date(now - 30 * 24 * 60 * 60 * 1000),
-        end: new Date(now),
-      };
-    }
-
-    const end = Math.max(...timestamps);
-    const start = Math.min(...timestamps); // Use actual minimum, not 30 days back
-    return { start: new Date(start), end: new Date(end) };
-  }, [detections]);
+  }, [detections, showOilSpills, showNonOilSpills, timelineDateIndex, uniqueDates]);
 
   const currentTimelineDate = useMemo(() => {
-    const startMs = timelineBounds.start.getTime();
-    const endMs = timelineBounds.end.getTime();
-    return new Date(startMs + ((endMs - startMs) * timelineProgressPercent) / 100);
-  }, [timelineBounds, timelineProgressPercent]);
+    if (uniqueDates.length === 0) return new Date();
+    const idx = Math.min(timelineDateIndex, uniqueDates.length - 1);
+    return new Date(uniqueDates[idx] + 'T12:00:00');
+  }, [uniqueDates, timelineDateIndex]);
 
   useEffect(() => {
     if (!isTimelinePlaying) return;
 
     const interval = setInterval(() => {
-      setTimelineProgressPercent((prev) => {
-        const next = prev + 3;
-        if (next >= 100) {
+      setTimelineDateIndex((prev) => {
+        const maxIdx = uniqueDates.length - 1;
+        const next = Math.min(prev, maxIdx) + 1;
+        if (next >= uniqueDates.length) {
           setIsTimelinePlaying(false);
-          return 100;
+          return maxIdx;
         }
         return next;
       });
-    }, 400);
+    }, 800);
 
     return () => clearInterval(interval);
-  }, [isTimelinePlaying]);
+  }, [isTimelinePlaying, uniqueDates.length]);
 
   useEffect(() => {
     console.log('📊 Fetching statistics (once on mount)');
@@ -239,6 +221,7 @@ function App() {
                 <BarChart3 className="w-4 h-4" />
                 <span className="text-sm font-medium">Statistics</span>
               </button>
+
               <button
                 onClick={handleRefresh}
                 disabled={loading}
@@ -318,6 +301,38 @@ function App() {
               onToggleOilSpills={() => setShowOilSpills(!showOilSpills)}
               onToggleNonOilSpills={() => setShowNonOilSpills(!showNonOilSpills)}
             />
+
+            {/* Neft Dashlari Detections List */}
+            {(() => {
+              const neftDetections = filteredDetections.filter(d =>
+                d.source?.includes('Neft Dashlari')
+              );
+              if (neftDetections.length === 0) return null;
+              return (
+                <div className="bg-white rounded-lg shadow-lg p-4 space-y-2">
+                  <h3 className="font-semibold text-gray-800 text-sm flex items-center gap-2">
+                    🛢️ Neft Dashlari ({neftDetections.length})
+                  </h3>
+                  <div className="space-y-1 max-h-48 overflow-y-auto">
+                    {neftDetections.map(d => (
+                      <button
+                        key={d.id}
+                        onClick={() => setSelectedDetection(d)}
+                        className="w-full text-left px-3 py-2 rounded-lg hover:bg-gray-50 transition-colors text-xs flex items-center justify-between gap-2 border border-gray-100"
+                      >
+                        <div className="flex items-center gap-2">
+                          <span className={`w-2 h-2 rounded-full flex-shrink-0 ${d.status === 'Oil spill' ? 'bg-red-500' : 'bg-green-500'}`} />
+                          <span className="text-gray-700">{new Date(d.detected_at).toLocaleDateString()}</span>
+                        </div>
+                        <span className={`font-medium ${d.status === 'Oil spill' ? 'text-red-600' : 'text-green-600'}`}>
+                          {d.confidence != null ? `${(d.confidence * 100).toFixed(0)}%` : '—'}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              );
+            })()}
             
             <div className="text-xs text-gray-500 text-center">
               Last updated: {lastRefresh.toLocaleTimeString()}
@@ -370,19 +385,19 @@ function App() {
                 <input
                   type="range"
                   min={0}
-                  max={100}
+                  max={Math.max(0, uniqueDates.length - 1)}
                   step={1}
-                  value={timelineProgressPercent}
+                  value={Math.min(timelineDateIndex, Math.max(0, uniqueDates.length - 1))}
                   onChange={(e) => {
                     setIsTimelinePlaying(false);
-                    setTimelineProgressPercent(Number(e.target.value));
+                    setTimelineDateIndex(Number(e.target.value));
                   }}
                   className="w-full"
                 />
                 <div className="flex justify-between text-xs text-gray-600 mt-1">
-                  <span>{timelineBounds.start.toLocaleDateString()}</span>
+                  <span>{uniqueDates.length > 0 ? new Date(uniqueDates[0] + 'T12:00:00').toLocaleDateString() : ''}</span>
                   <span className="font-medium">{currentTimelineDate.toLocaleDateString()}</span>
-                  <span>{timelineBounds.end.toLocaleDateString()}</span>
+                  <span>{uniqueDates.length > 0 ? new Date(uniqueDates[uniqueDates.length - 1] + 'T12:00:00').toLocaleDateString() : ''}</span>
                 </div>
               </div>
             </div>
