@@ -32,6 +32,7 @@ export interface NewsArticle {
   published_date: string;
   source: string;
   relevance_score?: number;
+  description?: string;
 }
 
 export interface SearchFilters {

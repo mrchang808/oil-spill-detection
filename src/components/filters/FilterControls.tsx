@@ -14,19 +14,21 @@ const FilterControls = ({
   onToggleNonOilSpills,
 }: FilterControlsProps) => {
   return (
-    <div className="bg-white rounded-lg shadow-lg p-6 space-y-4">
+    <div data-testid="filter-controls" className="bg-white rounded-lg shadow-lg p-6 space-y-4">
       <div className="flex items-center gap-2 mb-4">
         <Filter className="w-5 h-5 text-gray-700" />
         <h2 className="text-lg font-semibold text-gray-800">Filters</h2>
       </div>
 
       <div className="space-y-3">
-        <label className="flex items-center gap-3 cursor-pointer group">
+        <label className="flex items-center gap-3 cursor-pointer group" data-testid="filter-oil-spills-label">
           <div className="relative">
             <input
               type="checkbox"
               checked={showOilSpills}
               onChange={onToggleOilSpills}
+              data-testid="toggle-oil-spills"
+              aria-label="Show Oil Spills"
               className="w-5 h-5 rounded border-2 border-gray-300 text-red-600 focus:ring-2 focus:ring-red-500 focus:ring-offset-0 cursor-pointer"
             />
           </div>
@@ -35,12 +37,14 @@ const FilterControls = ({
           </span>
         </label>
 
-        <label className="flex items-center gap-3 cursor-pointer group">
+        <label className="flex items-center gap-3 cursor-pointer group" data-testid="filter-non-oil-label">
           <div className="relative">
             <input
               type="checkbox"
               checked={showNonOilSpills}
               onChange={onToggleNonOilSpills}
+              data-testid="toggle-non-oil-spills"
+              aria-label="Show Non Oil Spills"
               className="w-5 h-5 rounded border-2 border-gray-300 text-green-600 focus:ring-2 focus:ring-green-500 focus:ring-offset-0 cursor-pointer"
             />
           </div>
