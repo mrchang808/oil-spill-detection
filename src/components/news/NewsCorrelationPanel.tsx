@@ -92,7 +92,7 @@ const ArticleCard: React.FC<ArticleCardProps> = ({ article, index }) => {
           data-testid="article-link"
           className="inline-flex items-center gap-1 text-xs font-medium text-blue-600 hover:text-blue-700 transition-colors"
         >
-          Read full article <ExternalLink className="w-3 h-3" />
+          Search related news <ExternalLink className="w-3 h-3" />
         </a>
       </div>
     </div>
@@ -231,7 +231,7 @@ const NewsCorrelationPanel: React.FC<NewsCorrelationPanelProps> = ({ detection, 
 
       <div className="px-5 py-3 bg-white border-t border-gray-100 flex-shrink-0">
         <p className="text-xs text-gray-400 text-center">
-          Correlations are generated from regional maritime news patterns. Always verify with official sources.
+          Headlines are AI-generated based on regional patterns. Links open real news search results.
         </p>
       </div>
     </div>

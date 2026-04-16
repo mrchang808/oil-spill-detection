@@ -19,7 +19,7 @@ const OilSpillMap: React.FC<OilSpillMapProps> = ({
   showOilSpills,
   showNonOilSpills,
   onMarkerClick,
-  initialCenter = [25, 0],
+  initialCenter = [20, 0],
   initialZoom = 2,
 }) => {
   const mapRef = useRef<L.Map | null>(null);
@@ -31,7 +31,6 @@ const OilSpillMap: React.FC<OilSpillMapProps> = ({
   const [isLoading, setIsLoading] = useState(true);
   const [layerMode, setLayerMode] = useState<'natural' | 'osi'>('natural');
 
-  // 1. Initialize Map
   useEffect(() => {
     if (!mapContainerRef.current || mapRef.current) return;
 
@@ -41,6 +40,8 @@ const OilSpillMap: React.FC<OilSpillMapProps> = ({
       zoomControl: true,
       attributionControl: true,
       preferCanvas: true,
+      minZoom: 2,
+      maxBounds: [[-90, -200], [90, 200]],
     });
 
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -50,8 +51,7 @@ const OilSpillMap: React.FC<OilSpillMapProps> = ({
 
     markersRef.current = L.layerGroup().addTo(map);
     mapRef.current = map;
-    
-    // Safety timeout
+
     const timer = setTimeout(() => {
       if (map && mapContainerRef.current) {
         map.invalidateSize();
@@ -68,29 +68,23 @@ const OilSpillMap: React.FC<OilSpillMapProps> = ({
     };
   }, []);
 
-  // 2. Handle Container Resizing
   useEffect(() => {
     if (!mapContainerRef.current) return;
 
     const resizeObserver = new ResizeObserver(() => {
       if (mapRef.current && mapContainerRef.current) {
-        // ✅ Safety Check: Only invalidate if map container is still in DOM
         try {
           mapRef.current.invalidateSize();
         } catch {
-          // Ignore resize errors during unmount
+          // ignore resize errors during unmount
         }
       }
     });
 
     resizeObserver.observe(mapContainerRef.current);
-
-    return () => {
-      resizeObserver.disconnect();
-    };
+    return () => resizeObserver.disconnect();
   }, []);
 
-  // 3. Handle Layer Mode
   useEffect(() => {
     if (!mapRef.current) return;
 
@@ -112,13 +106,12 @@ const OilSpillMap: React.FC<OilSpillMapProps> = ({
           }
         }
       } catch (e) {
-        console.error("Layer update failed", e);
+        console.error('Layer update failed', e);
       }
     };
     updateLayer();
   }, [layerMode]);
 
-  // 4. Update Markers
   useEffect(() => {
     if (!mapRef.current || !markersRef.current) return;
 
@@ -133,38 +126,59 @@ const OilSpillMap: React.FC<OilSpillMapProps> = ({
 
     filtered.forEach((d) => {
       const isOil = d.status === 'Oil spill';
-      const color = isOil ? (d.severity === 'Critical' ? 'bg-red-700' : 'bg-red-500') : 'bg-green-500';
-      
-      const icon = L.divIcon({
-        className: 'custom-marker',
-        html: `<div class="relative group cursor-pointer">
-                <div class="${color} w-6 h-6 rounded-full border-2 border-white shadow-md"></div>
-               </div>`,
-        iconSize: [24, 24],
-        iconAnchor: [12, 12]
+      const isCritical = d.severity === 'Critical';
+      const isHigh = d.severity === 'High';
+
+      const fillColor = isOil
+        ? isCritical ? '#b91c1c'
+        : isHigh ? '#ef4444'
+        : '#f97316'
+        : '#22c55e';
+
+      const radius = isOil
+        ? isCritical ? 7
+        : isHigh ? 6
+        : 5
+        : 4;
+
+      const circle = L.circleMarker([d.latitude, d.longitude], {
+        radius,
+        fillColor,
+        color: '#fff',
+        weight: 1.5,
+        opacity: 1,
+        fillOpacity: isOil ? 0.85 : 0.65,
       });
 
-      const marker = L.marker([d.latitude, d.longitude], { icon });
-      
-      // Popup logic
-      const div = document.createElement('div');
-      div.innerHTML = `
-        <div class="p-2 min-w-[200px]">
-          <h3 class="font-bold ${isOil ? 'text-red-600' : 'text-green-600'}">${d.status}</h3>
-          <p class="text-xs text-gray-600 mb-2">${new Date(d.detected_at).toLocaleDateString()}</p>
-          <button id="btn-${d.id}" class="w-full bg-blue-600 text-white text-xs px-2 py-1 rounded">View Details</button>
+      const dateStr = new Date(d.detected_at).toLocaleDateString('en-GB', {
+        day: 'numeric', month: 'short', year: 'numeric',
+      });
+
+      const severityBadge = d.severity
+        ? `<span style="background:${isCritical ? '#b91c1c' : isHigh ? '#ef4444' : '#f97316'};color:#fff;padding:1px 6px;border-radius:9999px;font-size:10px;">${d.severity}</span>`
+        : '';
+
+      const popupContent = document.createElement('div');
+      popupContent.innerHTML = `
+        <div style="min-width:180px;padding:4px 2px;">
+          <div style="font-weight:700;font-size:13px;color:${isOil ? '#dc2626' : '#16a34a'};margin-bottom:2px;">${d.status}</div>
+          <div style="font-size:11px;color:#6b7280;margin-bottom:4px;">${dateStr}</div>
+          ${severityBadge}
+          ${d.area_affected_km2 ? `<div style="font-size:11px;margin-top:4px;color:#374151;">Area: <b>${d.area_affected_km2} km²</b></div>` : ''}
+          ${d.confidence ? `<div style="font-size:11px;color:#374151;">Confidence: <b>${Math.round(d.confidence * 100)}%</b></div>` : ''}
+          <button id="btn-${d.id}" style="margin-top:8px;width:100%;background:#2563eb;color:#fff;font-size:11px;padding:4px 8px;border:none;border-radius:4px;cursor:pointer;">View Details</button>
         </div>`;
-      
-      div.querySelector(`#btn-${d.id}`)?.addEventListener('click', (e) => {
+
+      popupContent.querySelector(`#btn-${d.id}`)?.addEventListener('click', (e) => {
         e.stopPropagation();
         onMarkerClick?.(d);
         window.dispatchEvent(new CustomEvent('marker-details-click', { detail: d.id }));
       });
 
-      marker.bindPopup(div);
-      marker.addTo(group);
+      circle.bindPopup(popupContent, { maxWidth: 220 });
+      circle.on('click', () => circle.openPopup());
+      circle.addTo(group);
     });
-
   }, [detections, showOilSpills, showNonOilSpills, onMarkerClick]);
 
   return (
@@ -172,8 +186,8 @@ const OilSpillMap: React.FC<OilSpillMapProps> = ({
       <div ref={mapContainerRef} className="w-full h-full z-0" />
       {isLoading && <MapLoadingOverlay />}
       <div className="absolute top-4 left-14 z-[1000] bg-white rounded-lg shadow-lg p-2">
-        <select 
-          value={layerMode} 
+        <select
+          value={layerMode}
           onChange={(e) => setLayerMode(e.target.value as 'natural' | 'osi')}
           className="text-sm border-none focus:ring-0 cursor-pointer"
         >
